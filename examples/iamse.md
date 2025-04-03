@@ -1,4 +1,14 @@
-The [Okta MCP Server](https://github.com/fctr-id/okta-mcp-server) brings real-time, agentic capabilities to your Okta environment through the Model Context Protocol (MCP), perfectly complementing the [AI Agent for Okta](https://github.com/fctr-id/okta-ai-agent). Where the AI Agent delivers powerful analysis of data and complex query processing against synced information, the MCP Server provides immediate access to live Okta data through an agentic interface—giving you the best of both worlds: comprehensive analysis and up-to-the-second insights when you need them most.
+# MCP for Okta: Extending Your AI Strategy
+
+The [Okta MCP Server](https://github.com/fctr-id/okta-mcp-server) brings real-time, agentic capabilities to your Okta environment through the Model Context Protocol (MCP), perfectly complementing the [AI Agent for Okta](https://github.com/fctr-id/okta-ai-agent). 
+
+## Executive Summary
+
+The Okta MCP Server transforms how AI assistants interact with your Okta environment by providing a standardized protocol layer between AI models and Okta's APIs. This integration enables natural language control of identity operations, real-time data access, and multi-system workflows—all while maintaining enterprise-grade security controls.
+
+**Current capabilities** focus on read-only operations for users and groups, with rapid expansion planned for additional entities and operations in upcoming releases.
+
+> **CURRENT STATE HIGHLIGHT:** The Okta MCP Server is in active development (alpha), currently implementing read-only tools for users and groups, with rapid expansion planned. The current implementation prioritizes security and reliability while establishing the foundation for more advanced capabilities.
 
 ## What is the Model Context Protocol (MCP)?
 
@@ -70,15 +80,7 @@ These examples demonstrate how the Okta MCP Server functions as a critical compo
 
 > **Future Integration:** While currently offered as separate tools, our roadmap includes integrating the AI Agent for Okta and the Okta MCP Server into a unified product. This integration will provide the best of both worlds: comprehensive historical analysis with the speed of local queries, combined with real-time operations and data when needed—all through a single, seamless interface.
 
-### Current State of the project and Rapid Development
-
-The Okta MCP Server is actively under development, with our initial release focusing on core functionality:
-- Currently implementing read-only tools for users and groups
-- Rapid expansion planned for additional entities and operations
-- Adding new capabilities with each release
-- Prioritizing security and reliability in our development process
-
-This foundation will quickly expand to cover more Okta entities and operations in upcoming releases.
+## Key Features for IAM Professionals
 
 ### Multiple AI Client Support
 
@@ -108,7 +110,6 @@ Security remains paramount:
 - Error handling designed for security
 - Future enhancements will include detailed audit logging and approval workflows
 
-
 ## Architecture
 
 The Okta MCP Server acts as a bridge between MCP-compatible AI clients and the Okta API, enabling seamless interaction and management of identity operations.
@@ -124,6 +125,23 @@ For IAM professionals, security is non-negotiable. The Okta MCP Server implement
 - Tool-Level Authorization: Fine-grained control over which operations are available to AI models
 - Human Verification: Future updates will add explicit human approval for critical operations
 - Data Privacy: Sensitive Okta data, credentials, and security configurations are never sent to AI models without approval
+
+## Future Roadmap
+
+The Okta MCP Server roadmap focuses on expanding its capabilities:
+- Workflow Automation: Building and managing end-to-end identity workflows with pre-defined guardrails
+- Multi-tenant Support: Managing multiple Okta environments from a single server instance
+- Human-in-the-Loop Workflows: Adding approval mechanisms for sensitive operations
+- Comprehensive Audit Logging: Detailed tracking of all operations and decisions
+- Cross-tool Workflow Integration: Deeper integration with other MCP servers for complex business processes
+
+## Conclusion
+
+The Okta MCP Server represents a significant advancement in how AI can be leveraged within Identity and Access Management. By implementing the Model Context Protocol for Okta, it enables seamless integration between AI models and your identity infrastructure, maintaining security while providing improved operational capabilities.
+
+We encourage you to explore the project on GitHub (https://github.com/fctr-id/okta-mcp-server), contribute to its development, and consider how this approach can help your organization more effectively manage identity resources.
+
+## Appendix: Technical Configuration
 
 ### Sample Client Configuration
 
@@ -149,18 +167,3 @@ For MCP clients like Claude Desktop, add this to your `claude_desktop_config.jso
 Make sure to replace:
 - `DIR` with the absolute path to your directory
 - `OKTA_API_TOKEN` with your actual Okta API token
-
-## Future Roadmap
-
-The Okta MCP Server roadmap focuses on expanding its capabilities:
-- Workflow Automation: Building and managing end-to-end identity workflows with pre-defined guardrails
-- Multi-tenant Support: Managing multiple Okta environments from a single server instance
-- Human-in-the-Loop Workflows: Adding approval mechanisms for sensitive operations
-- Comprehensive Audit Logging: Detailed tracking of all operations and decisions
-- Cross-tool Workflow Integration: Deeper integration with other MCP servers for complex business processes
-
-## Conclusion
-
-The Okta MCP Server represents a significant advancement in how AI can be leveraged within Identity and Access Management. By implementing the Model Context Protocol for Okta, it enables seamless integration between AI models and your identity infrastructure, maintaining security while providing improved operational capabilities.
-
-We encourage you to explore the project on GitHub (https://github.com/fctr-id/okta-mcp-server), contribute to its development, and consider how this approach can help your organization more effectively manage identity resources.

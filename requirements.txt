@@ -1,0 +1,7 @@
+pydantic
+pydantic-ai==0.0.45
+okta
+python-dotenv
+mcp
+uvicorn
+fastapi

@@ -1,0 +1,8 @@
+implementation-plan.md
+venv/*
+.env
+examples/*
+__pycache__/
+__init__.py
+logs/mcp_protocol.log
+examples/iamse.md
