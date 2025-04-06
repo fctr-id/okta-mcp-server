@@ -2,7 +2,7 @@
 import os
 import time
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Callable, Awaitable
 
 from okta.client import Client as OktaClient
 
@@ -11,14 +11,16 @@ logger = logging.getLogger(__name__)
 class OktaMcpClient:
     """Wrapper around the Okta SDK client with rate limiting and error handling."""
     
-    def __init__(self, client: OktaClient):
+    def __init__(self, client: OktaClient, request_manager=None):
         """Initialize the Okta MCP client wrapper.
         
         Args:
             client: An initialized Okta SDK client
+            request_manager: Optional RequestManager to control concurrent requests
         """
         self.client = client
         self.rate_limits = {}  # Tracks rate limits by endpoint
+        self.request_manager = request_manager
     
     def update_rate_limit(self, endpoint: str, reset_seconds: int):
         """Update rate limit tracking for an endpoint.
@@ -48,6 +50,28 @@ class OktaMcpClient:
             return False
             
         return True
+    
+    async def execute_api_call(self, func, *args, **kwargs):
+        """Execute an Okta API call with concurrency control.
+        
+        If a request_manager is available, the call will be
+        managed to ensure we don't exceed concurrent call limits.
+        
+        Args:
+            func: The API function to call
+            args, kwargs: Arguments to pass to the function
+            
+        Returns:
+            The result of the API call
+        """
+        # If we have a request manager, use it to control concurrency
+        if self.request_manager:
+            logger.debug(f"Executing API call via RequestManager: {func.__name__}")
+            return await self.request_manager.execute(func, *args, **kwargs)
+        
+        # Otherwise execute directly
+        logger.debug(f"Executing API call directly: {func.__name__}")
+        return await func(*args, **kwargs)
 
 
 def create_okta_client(org_url: str, api_token: str) -> OktaClient:

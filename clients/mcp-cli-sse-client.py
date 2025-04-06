@@ -40,6 +40,14 @@ DEBUG_MODE = logger.getEffectiveLevel() <= logging.DEBUG
 # Server connection parameters for SSE
 SERVER_URL = "http://localhost:3000/sse"
 
+system_prompt="""
+You are a an expert in Okta identity management suite. You understand the the OKTA APIs and how identities work in an enterprise environment.
+Since this is a technical AI agent , your responses should be output in JSON format. no other words or charactares should be present in the output.
+Do NOT summarize or explain the output. Just give the JSON output.
+When passing groups or users to the API, you have to just use the name provided in the query . Do not append any other words or charactares to the name.
+Every entity in OKTA has a unique ID. You have to get the ID first using the list_ or get_ tools 
+"""
+
 class AIProvider(str, Enum):
     VERTEX_AI = "vertex_ai"
     OPENAI = "openai"
@@ -51,6 +59,7 @@ class ModelConfig:
     def get_reasoning_model():
         """Get the reasoning model based on configured provider"""
         provider = os.getenv('AI_PROVIDER', 'vertex_ai').lower()
+        console.print(f"Using AI provider: {provider}")
         
         if provider == AIProvider.VERTEX_AI:
             service_account = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('VERTEX_AI_SERVICE_ACCOUNT_FILE')
@@ -231,6 +240,7 @@ class OktaMCPAgent:
             # Create the agent with the MCP server
             self.agent = Agent(
                 model=self.model,
+                system_prompt=system_prompt,
                 mcp_servers=[self.mcp_server]
             )
             
@@ -304,6 +314,7 @@ async def interactive_agent():
     """Run an interactive session with the agent."""
     # Create the client
     client = OktaMCPAgent()
+    console.print("AI Provider Selected: ", ModelConfig.get_reasoning_model())
     
     try:
         # Connect to the MCP server
@@ -366,6 +377,7 @@ async def interactive_agent():
 
 if __name__ == "__main__":
     try:
+        
         asyncio.run(interactive_agent())
     except KeyboardInterrupt:
         console.print("\n[italic]Client terminated by user[/]")

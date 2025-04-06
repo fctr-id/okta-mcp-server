@@ -6,3 +6,4 @@ __pycache__/
 __init__.py
 logs/mcp_protocol.log
 examples/iamse.md
+clients/node_modules/

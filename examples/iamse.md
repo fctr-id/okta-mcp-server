@@ -14,6 +14,8 @@ The Okta MCP Server transforms how AI assistants interact with your Okta environ
 
 The Model Context Protocol (MCP) is an open standard that enables AI models to interact with external tools and services in a structured, secure way. It provides a consistent interface for AI systems to discover and use capabilities exposed by servers, allowing AI assistants to extend their functionality beyond their training data.
 
+Think of MCP as the "USB-C of AI integration" - just as USB-C provides a universal standard that allows various devices to connect and communicate regardless of manufacturer, MCP creates a standardized way for AI models to discover and interact with different services without custom integration for each one. This "plug-and-play" approach means developers can build tools once and have them work across multiple AI assistants, while users benefit from seamless integration without worrying about compatibility issues.
+
 ![MCP](https://raw.githubusercontent.com/fctr-id/okta-mcp-server/refs/heads/main/images/mcp.png "Model Context Protocol architecture")
 
 MCP creates a bridge between AI models and real-world systems by defining:
@@ -39,33 +41,17 @@ Find all available MCP server implementations at the [MCP servers repository](ht
 
 The true magic of MCP servers emerges when multiple tools work together through your AI assistant to create seamless workflows. Here are some powerful, real-world examples that would traditionally require custom scripts but can now be accomplished with natural language:
 
-### Cross-Platform Identity Workflows
+* **Export locked Okta users to Google Drive** - "Find all locked users in our Okta tenant, and create a spreadsheet in our IT Operations folder on Google Drive with their names, email addresses, and last login dates."
+  
+  *Implementation: The Okta MCP Server queries locked users via the Okta API, collects their profile data, then passes this structured information to the Google Drive MCP Server which creates and populates the spreadsheet in the specified location.*
 
-**Example: Export locked Okta users to Google Drive**
+* **Secure compromised accounts and document the incident** - "For all users who failed MFA more than 5 times today, suspend their Okta accounts, add them to the 'Security Review' group, and create an incident report in our security Slack channel with the details."
+  
+  *Implementation: The Okta MCP Server identifies accounts with MFA failures, executes status changes and group assignments through the Okta API, then the Slack MCP Server formats and posts the incident details to the specified channel.*
 
-"Find all locked users in our Okta tenant, and create a spreadsheet in our IT Operations folder on Google Drive with their names, email addresses, and last login dates."
-1. The AI assistant uses the Okta MCP Server to query locked user accounts
-2. It then leverages a Google Drive MCP Server to create and populate a spreadsheet
-3. All of this happens with a single natural language request, no coding required
-
-### Security Incident Response Workflows
-
-**Example: Secure compromised accounts and document the incident**
-
-"For all users who failed MFA more than 5 times today, suspend their Okta accounts, add them to the 'Security Review' group, and create an incident report in our security Slack channel with the details."
-1. The Okta MCP Server identifies users with multiple MFA failures
-2. It suspends accounts and modifies group membership
-3. A Slack MCP Server creates the incident documentation
-4. Human approval steps ensure appropriate oversight
-
-### Compliance Reporting Workflows
-
-**Example: Generate access review documentation for audit**
-
-"Create a report of all privileged account activities for the past quarter, export it to a secure SharePoint folder, and send me a summary of unusual access patterns."
-1. The Okta MCP Server gathers privileged account activity logs
-2. A SharePoint MCP Server handles secure document storage
-3. The AI analyzes the data for unusual patterns and creates a summary
+* **Generate access review documentation for audit** - "Create a report of all privileged account activities for the past quarter, export it to a secure SharePoint folder, and send me a summary of unusual access patterns."
+  
+  *Implementation: The Okta MCP Server extracts privileged account activities from logs, the SharePoint MCP Server creates and stores the report file, while the AI analyzes the data patterns and generates the summary.*
 
 These examples demonstrate how the Okta MCP Server functions as a critical component in a broader ecosystem of AI-powered identity management workflows, replacing complex scripting with natural language instructions while maintaining appropriate security controls.
 
