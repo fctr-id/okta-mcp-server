@@ -52,13 +52,13 @@ def main():
     load_dotenv()
     
     # Check for required environment variables
-    required_vars = ["OKTA_ORG_URL", "OKTA_API_TOKEN"]
+    required_vars = ["OKTA_CLIENT_ORGURL", "OKTA_API_TOKEN"]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
         logger.error("Create a .env file with the following variables:")
-        logger.error("OKTA_ORG_URL=https://your-org.okta.com")
+        logger.error("OKTA_CLIENT_ORGURL=https://your-org.okta.com")
         logger.error("OKTA_API_TOKEN=your-api-token")
         return 1
     

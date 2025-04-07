@@ -23,7 +23,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     async def list_groups(
         query: str = None,
         filter_type: str = None,
-        limit: int = 20,
+        limit: int = 200,
         name: str = None,
         type: str = None,
         after: str = None

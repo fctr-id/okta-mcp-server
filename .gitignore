@@ -7,3 +7,4 @@ __init__.py
 logs/mcp_protocol.log
 examples/iamse.md
 clients/node_modules/
+examples/iamse.md

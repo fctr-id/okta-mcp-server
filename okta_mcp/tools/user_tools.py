@@ -23,7 +23,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
     async def list_users(
         query: str = None,
         search: str = None, 
-        limit: int = 20, 
+        limit: int = 200, 
         filter_type: str = None,
         sort_by: str = "created",
         sort_order: str = "desc"

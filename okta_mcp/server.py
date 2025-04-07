@@ -27,7 +27,7 @@ def create_server():
         
         logger.info("Initializing Okta client")
         okta_client = create_okta_client(
-            org_url=os.getenv("OKTA_ORG_URL"),
+            org_url=os.getenv("OKTA_CLIENT_ORGURL"),
             api_token=os.getenv("OKTA_API_TOKEN")
         )
         
