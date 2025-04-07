@@ -28,6 +28,8 @@ from openai import AsyncAzureOpenAI
 
 # Add the parent directory to sys.path to enable imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from okta_mcp.utils.logging import configure_logging
+main_logger = configure_logging()
 
 # Load environment variables
 load_dotenv()
@@ -39,7 +41,7 @@ console = Console()
 
 system_prompt="""
 You are a an expert in Okta identity management suite. You understand the the OKTA APIs and how identities work in an enterprise environment.
-Since this is a technical AI agent , your responses should be output in JSON format. no other words or charactares should be present in the output.
+Since this is a technical AI agent , your responses should be output in JSON format. no other words or characters should be present in the output.
 Do NOT summarize or explain the output. Just give the JSON output.
 When passing groups or users to the API, you have to just use the name provided in the query . Do not append any other words or charactares to the name.
 Every entity in OKTA has a unique ID. You have to get the ID first using the list_ or get_ tools 
