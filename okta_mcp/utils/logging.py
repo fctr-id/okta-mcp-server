@@ -2,32 +2,43 @@
 
 import os
 import logging
+import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from dotenv import load_dotenv
 
-def configure_logging(log_dir="logs", log_level=logging.INFO):
+load_dotenv()  # Load environment variables from .env file
+# Custom formatter for ISO8601 timestamps with Z suffix
+class ISO8601Formatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        # Create ISO8601 format with milliseconds and Z suffix
+        dt = datetime.datetime.fromtimestamp(record.created)
+        return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+
+def configure_logging(log_level=os.getenv("LOG_LEVEL", "INFO").upper()):
     """
     Configure logging to both console and file with rotation.
     
     Args:
-        log_dir: Directory to store log files
         log_level: Logging level (default: INFO)
         
     Returns:
         Logger instance
     """
-    # Create logs directory if it doesn't exist
-    log_path = Path(log_dir)
+    # Find the project root by going up from the current file location 
+    # instead of using the current working directory
+    current_file = Path(__file__)  # Get the path of this logging.py file
+    project_root = current_file.parent.parent.parent  # Navigate up to root
+    
+    # Create logs directory in project root
+    log_path = project_root / "logs"
     log_path.mkdir(exist_ok=True)
     
     # Define log file path
     log_file = log_path / "okta_mcp_server.log"
     
-    # Create formatter
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] [%(name)s] %(message)s',
-        datefmt='%Y-%m-%dT%H:%M:%S.%fZ'
-    )
+    # Create custom ISO8601 formatter
+    formatter = ISO8601Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
     
     # Set up file handler with rotation (10MB files, keep 5 backups)
     file_handler = RotatingFileHandler(
@@ -57,6 +68,5 @@ def configure_logging(log_dir="logs", log_level=logging.INFO):
     
     # Create server logger
     logger = logging.getLogger("okta_mcp_server")
-    logger.info(f"Logging initialized. Logs saved to: {log_file}")
     
     return logger
