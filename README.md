@@ -6,7 +6,7 @@
 
 <h2 style="margin-left: 10px" >Okta MCP Server (v0.1.0-ALPHA)</h2>
 
-The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources. Our vision is to create a secure bridge between AI models and Okta's powerful API ecosystem, maintaining enterprise-grade security while unlocking unprecedented integration capabilities.
+The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
 
 <div >
 <p><a href="https://github.com/fctr-id/okta-mcp-server">View on GitHub</a> | <a href="https://modelcontextprotocol.io/introduction">Learn about MCP</a> | <a href="https://github.com/fctr-id/okta-ai-agent">Okta AI Agent</a></p>
@@ -31,7 +31,7 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
-  - [Configuration](#configuration)
+  - [Configuration \& Usage](#configuration--usage)
   - [Supported Transports and Launching](#supported-transports-and-launching)
     - [1. Standard I/O (STDIO) - Recommended](#1-standard-io-stdio---recommended)
     - [2. Server-Sent Events (SSE) - Advanced Use Only](#2-server-sent-events-sse---advanced-use-only)
@@ -49,7 +49,7 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 
 ## 🔍 What is the Model Context Protocol?
 
-<div align="celeftnter">
+<div align="left">
 <p>The Model Context Protocol (MCP) is an open standard that enables AI models to interact with external tools and services in a structured, secure way. It provides a consistent interface for AI systems to discover and use capabilities exposed by servers, allowing AI assistants to extend their functionality beyond their training data.</p>
 
 <p>Think of MCP as the "USB-C of AI integration" - just as USB-C provides a universal standard that allows various devices to connect and communicate regardless of manufacturer, MCP creates a standardized way for AI models to discover and interact with different services without custom integration for each one. This "plug-and-play" approach means developers can build tools once and have them work across multiple AI assistants, while users benefit from seamless integration without worrying about compatibility issues.</p>
@@ -142,28 +142,31 @@ source venv/bin/activate  # On Windows use: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Configuration
+### Configuration & Usage
 
 Create a config file with your Okta settings:
 
+To use the command line client (no memory), use the instructions below
+
 ```bash
 # Copy the sample config
-cp config.example.json config.json
+cp .env.sample .env
 
-# Edit with your settings
-# Required: Okta domain and API token
+# Edit the env with your settings
+# Required: Okta domain and API token and LLM settings
+
+cd clients
+python mcp-cli-stdio-client.py
 ```
+
+To use MCP hosts like Claude Code, vsCode ...etc find the json config below
+
 
 ### Supported Transports and Launching
 
 The Okta MCP Server supports two transport protocols:
 
 #### 1. Standard I/O (STDIO) - Recommended
-
-```bash
-# Run the server in STDIO mode (default)
-python main.py
-```
 
 - **Security**: Direct communication through standard input/output streams
 - **Use case**: Ideal for desktop AI assistants like Claude Desktop
@@ -264,4 +267,4 @@ Check out [`License.md`](LICENSE) for the fine print.
 
 ---
 
-🌟 © 2024 Fctr. All rights reserved. Made with ❤️ for the Okta and AI communities.
+🌟 © 2025 Fctr Identity. All rights reserved. Made with ❤️ for the Okta and AI communities.
