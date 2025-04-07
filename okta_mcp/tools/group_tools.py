@@ -7,9 +7,9 @@ from mcp.types import TextContent
 
 from okta_mcp.utils.okta_client import OktaMcpClient
 from okta_mcp.utils.error_handling import handle_okta_result
-from okta_mcp.utils.normalize_okta_responses import normalize_okta_response
+from okta_mcp.utils.normalize_okta_responses import normalize_okta_response, paginate_okta_response
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("okta_mcp_server")
 
 def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     """Register all group-related tools with the MCP server.
@@ -23,7 +23,6 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     async def list_groups(
         query: str = None,
         filter_type: str = None,
-        limit: int = 200,
         name: str = None,
         type: str = None,
         after: str = None
@@ -33,7 +32,6 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         Args:
             query: Simple text search on name (e.g., 'Engineering')
             filter_type: Group filter (e.g., 'type eq "OKTA_GROUP"')
-            limit: Maximum number of groups to return (1-200)
             name: Filter by exact group name
             type: Filter by group type (OKTA_GROUP, APP_GROUP, etc.)
             after: Pagination cursor
@@ -42,6 +40,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             Dictionary containing groups and pagination information
         """
         try:
+            limit = 200
             # Validate parameters
             if limit < 1 or limit > 200:
                 raise ValueError("Limit must be between 1 and 200")
@@ -78,14 +77,23 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 logger.error(f"Error listing groups: {err}")
                 return handle_okta_result(err, "list_groups")
             
-            # Format response
+            # Apply pagination based on environment variable - ADD THIS CODE
+            all_groups, final_resp, final_err, page_count = await paginate_okta_response(groups, resp, err)
+            
+            if final_err:
+                logger.error(f"Error during pagination: {final_err}")
+                return handle_okta_result(final_err, "list_groups")
+            
+            # Format response with enhanced pagination info
             result = {
-                "groups": [group.as_dict() for group in groups],
+                "groups": [group.as_dict() for group in all_groups],
                 "pagination": {
                     "limit": limit,
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "page_count": page_count,
+                    "total_results": len(all_groups),
+                    "has_more": bool(final_resp.has_next()) if hasattr(final_resp, 'has_next') else False,
+                    "self": final_resp.self if hasattr(final_resp, 'self') else None,
+                    "next": final_resp.next if hasattr(final_resp, 'next') and final_resp.has_next() else None
                 }
             }
             
@@ -126,20 +134,19 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     @server.tool()
     async def list_group_members(
         group_id: str,
-        limit: int = 50,
         after: str = None
     ) -> Dict[str, Any]:
         """List all members of a specific Okta group.
         
         Args:
             group_id: The ID of the group
-            limit: Maximum number of members to return (1-200)
             after: Pagination cursor
             
         Returns:
             Dictionary containing group members and pagination information
         """
         try:
+            limit = 200
             # Validate parameters
             if limit < 1 or limit > 200:
                 raise ValueError("Limit must be between 1 and 200")
@@ -160,15 +167,24 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 logger.error(f"Error listing group members for group {group_id}: {err}")
                 return handle_okta_result(err, "list_group_users")
             
-            # Format response
+            # Apply pagination based on environment variable - ADD THIS CODE
+            all_users, final_resp, final_err, page_count = await paginate_okta_response(users, resp, err)
+            
+            if final_err:
+                logger.error(f"Error during pagination: {final_err}")
+                return handle_okta_result(final_err, "list_group_members")
+            
+            # Format response with enhanced pagination info
             result = {
-                "members": [user.as_dict() for user in users],
+                "members": [user.as_dict() for user in all_users],
                 "group_id": group_id,
                 "pagination": {
                     "limit": limit,
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "page_count": page_count,
+                    "total_results": len(all_users),
+                    "has_more": bool(final_resp.has_next()) if hasattr(final_resp, 'has_next') else False,
+                    "self": final_resp.self if hasattr(final_resp, 'self') else None,
+                    "next": final_resp.next if hasattr(final_resp, 'next') and final_resp.has_next() else None
                 }
             }
             
