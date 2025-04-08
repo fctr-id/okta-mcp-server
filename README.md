@@ -116,6 +116,14 @@ The Okta MCP Server currently provides the following tools:
 - `list_groups` - Retrieve groups in your Okta organization with filtering options
 - `get_group` - Get detailed information about a specific group
 - `list_group_members` - List all members of a specific group
+- `list_assigned_applications_for_group` - List all applications assigned to a specific group
+
+**Application Management**
+- `list_applications` - Retrieve applications with filtering, search, and pagination options
+
+**System Log Events**
+- `get_logs` - Retrieve Okta system log events with time-based, filter, and search options
+
 
 > Additional tools for applications, factors, policies, and more advanced operations are on the roadmap and will be added in future releases.
 
@@ -126,6 +134,13 @@ The Okta MCP Server currently provides the following tools:
 ✅ Python 3.8+ installed on your machine  
 ✅ Okta tenant with appropriate API access  
 ✅ An MCP-compatible AI client (Claude Desktop, Microsoft Copilot Studio, etc.)  
+
+> **⚠️ Important Model Compatibility Note:**  
+> Not all AI models work with this MCP server. Testing has only been performed with:
+> - GPT-4.0
+> - Claude 3.7 Sonnet
+>
+> You must use latest model versions that explicitly support tool calling/function calling capabilities. Older models or models without tool calling support will not be able to interact with the Okta MCP Server.
 
 ### Installation
 
