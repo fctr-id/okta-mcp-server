@@ -58,7 +58,7 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 
 <div align="left">
       <a href="https://modelcontextprotocol.io/introduction">
-         <img src="docs/mcp-overview.png" style="width:500px">
+         <img src="images/MCP-Example.png" style="width:500px">
       </a>
 </div>
 </div>
