@@ -3,7 +3,7 @@
 import logging
 import csv
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
 
@@ -12,6 +12,36 @@ from okta_mcp.utils.error_handling import handle_okta_result
 from okta_mcp.utils.normalize_okta_responses import normalize_okta_response, paginate_okta_response
 
 logger = logging.getLogger("okta_mcp_server")
+
+# Add these imports for Pydantic AI
+from pydantic import BaseModel, Field
+# Define Pydantic model for event codes
+class OktaEventCode(BaseModel):
+    """Model representing an Okta event code."""
+    event_type: str = Field(..., description="The Okta event type identifier")
+    description: str = Field(..., description="Description of what the event represents")
+
+async def load_event_codes() -> List[OktaEventCode]:
+    """Load event codes from CSV file."""
+    event_codes = []
+    # Adjust path based on your actual file location
+    csv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
+                        'data', 'okta-event-codes.csv')
+    
+    try:
+        with open(csv_path, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Use the exact column names from your CSV
+                event_codes.append(OktaEventCode(
+                    event_type=row.get('Event Type', ''),
+                    description=row.get('Description', '')
+                ))
+        return event_codes
+    except Exception as e:
+        logger.error(f"Error loading event codes CSV: {e}")
+        return []
+
 
 def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
     """Register all log event-related tools with the MCP server.
@@ -157,6 +187,133 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             logger.exception("Error in get_logs tool")
             if ctx:
                 ctx.error(f"Error in get_logs tool: {str(e)}")
-            return handle_okta_result(e, "get_logs")
-    
+            return handle_okta_result(e, "get_logs")        
+        
     logger.info("Registered log event management tools")
+    
+#@server.tool()
+async def analyze_event_codes(
+    description: str,
+    ctx: Context = None
+) -> Dict[str, Any]:
+    """Analyze Okta event codes based on a description and return relevant codes for filtering logs.
+    This tool uses AI to analyze Okta event codes based on your description
+    and returns the appropriate codes to use with the get_logs filter parameter.
+    
+    Args:
+        description: Description of the types of events you want to find (e.g., "failed logins", "user creation")
+        ctx: MCP Context for progress reporting and logging
+        
+    Returns:
+        Dictionary containing recommended event codes and filter string to use with get_logs
+    """
+    try:
+        if ctx:
+            ctx.info(f"Analyzing event codes for: {description}")
+            await ctx.report_progress(10, 100)
+        
+        # Load event codes from CSV
+        event_codes = await load_event_codes()
+        
+        if not event_codes:
+            return {
+                "error": "Failed to load event codes",
+                "filter_string": None,
+                "event_codes": []
+            }
+        
+        if ctx:
+            ctx.info(f"Loaded {len(event_codes)} event codes")
+            await ctx.report_progress(30, 100)
+        
+        # Create the model instance using the same approach as in mcp-cli-stdio-client.py
+        # Use global model from the agent's existing setup
+        # This assumes the agent's model is already set up and can be accessed
+        
+        # Import the Agent class from your existing setup
+        from pydantic_ai import Agent
+        from okta_mcp.utils.model_provider import get_model
+        
+        model = get_model()  # Get the model from your utility function
+        
+        # Create a system prompt specific to this task
+        system_prompt = """
+        You are an expert in Okta event codes. Your task is to analyze Okta event codes and 
+        select the most relevant ones based on the user's query.
+        
+        Review the provided event codes and select only those that closely match what the user is looking for.
+        Provide a brief explanation for why you selected these codes.
+        
+        Return your response as a JSON object with these properties:
+        - event_codes: Array of relevant event type strings
+        """
+        
+        # Create an agent for this specific task
+        agent = Agent(
+            model=model,
+            system_prompt=system_prompt
+        )
+        
+        if ctx:
+            ctx.info("Creating agent to analyze event codes")
+            await ctx.report_progress(50, 100)
+        
+        # Format the event codes as a simple list for the AI
+        event_data = "\n".join([f"Event Type: {e.event_type}" for e in event_codes])
+        
+        # Create the prompt for the AI
+        prompt = f"""
+        I need to find Okta log events related to: {description}
+        
+        Here are the available Okta event types:
+        {event_data}
+        
+        Select the most relevant event types for this request and return them in the required JSON format.
+        """
+        
+        # Run the analysis
+        if ctx:
+            ctx.info("Running AI analysis of event codes")
+            await ctx.report_progress(70, 100)
+        
+        result = await agent.run(prompt)
+        
+        # Extract the data from the result
+        if hasattr(result, 'data') and isinstance(result.data, dict):
+            response_data = result.data
+        else:
+            # Fallback if structuring failed
+            response_data = {
+                "event_codes": []
+            }
+        
+        # Format the filter string for Okta's API
+        event_codes = response_data.get("event_codes", [])
+        if event_codes:
+            if len(event_codes) == 1:
+                filter_string = f"eventType eq \"{event_codes[0]}\""
+            else:
+                filter_parts = [f"eventType eq \"{code}\"" for code in event_codes]
+                filter_string = "(" + " or ".join(filter_parts) + ")"
+        else:
+            filter_string = ""
+        
+        if ctx:
+            ctx.info("Analysis complete")
+            await ctx.report_progress(100, 100)
+        
+        return {
+            "event_codes": event_codes,
+            "filter_string": filter_string,
+            "explanation": response_data.get("explanation", "")
+        }
+        
+    except Exception as e:
+        logger.exception("Error in analyze_event_codes tool")
+        if ctx:
+            ctx.error(f"Error in analyze_event_codes tool: {str(e)}")
+        return {
+            "error": str(e),
+            "filter_string": None,
+            "event_codes": []
+        }       
