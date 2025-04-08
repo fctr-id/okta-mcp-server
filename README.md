@@ -8,15 +8,15 @@
 
 The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
 
-<div >
-<p><a href="https://github.com/fctr-id/okta-mcp-server">View on GitHub</a> | <a href="https://modelcontextprotocol.io/introduction">Learn about MCP</a> | <a href="https://github.com/fctr-id/okta-ai-agent">Okta AI Agent</a></p>
+<div style="align: center" >
+<p ><a href="https://github.com/fctr-id/okta-mcp-server">View on GitHub</a> | <a href="https://modelcontextprotocol.io/introduction">Learn about MCP</a> | <a href="https://github.com/fctr-id/okta-ai-agent">Okta AI Agent</a></p>
 </div>
 
 <div >
-<h3>MCP Integration with AI Assistants</h3>
+<h3>Quick Demo</h3>
 </div>
 <p >
-  <img src="docs/okta-mcp-demo.gif" alt="Okta MCP Server Demo" width="1024px" height="auto">
+  <img src="images/mcp-server.gif" alt="Okta MCP Server Demo" width="1024px" height="auto">
 </p>
 
 ## 📋 Table of Contents
