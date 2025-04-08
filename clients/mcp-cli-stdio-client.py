@@ -40,7 +40,7 @@ console = Console()
 # Custom formatter with ISO8601 timestamps and Z suffix
 
 system_prompt="""
-You are a an expert in Okta identity management suite. You understand the the OKTA APIs and how identities work in an enterprise environment.
+You are a an expert in Okta identity management suite especially with Okta's python SDK utilities. You understand the the OKTA APIs and how identities work in an enterprise environment.
 Since this is a technical AI agent , your responses should be output in JSON format. no other words or characters should be present in the output.
 Do NOT summarize or explain the output. Just give the JSON output.
 When passing groups or users to the API, you have to just use the name provided in the query . Do not append any other words or charactares to the name.
