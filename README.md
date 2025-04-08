@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" >Okta MCP Server (v0.1.0-ALPHA)</h2>
+<h2 style="margin-left: 10px; text-align: center" >Okta MCP Server (v0.1.0-ALPHA)</h2>
 
 The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
 
