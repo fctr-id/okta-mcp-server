@@ -25,20 +25,10 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         search: str = None, 
         filter_type: str = None,
         sort_by: str = "created",
-        sort_order: str = "desc"
+        sort_order: str = "desc",
+        ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta users with  filtering. Use query for simple terms (e.g. 'Dan') or search for SCIM filters (e.g. profile.firstName eq "Dan").
-            q (Simple Query):
-            Basic startsWith search on firstName, lastName, email.
-            Example: {'q': 'john'}
-            filter (Limited Filtering):
-            Simpler syntax, mainly uses eq (equal).
-            Supports date comparisons (gt, lt, etc.) only for lastUpdated.
-            Filters on specific fields like status, lastUpdated, id, profile.login, profile.email, profile.firstName, profile.lastName.
-            Examples:
-            {'filter': 'status eq "ACTIVE"'}
-            {'filter': 'lastUpdated gt "2024-01-01T00:00:00.000Z"'}
-            {'filter': 'status eq "ACTIVE" and profile.lastName eq "Doe"'}
+        """List Okta users with filtering. Use query for simple terms (e.g. 'Dan') or search for SCIM filters (e.g. profile.firstName eq "Dan").
             search (Recommended, Powerful):
             Uses flexible SCIM filter syntax.
             Supports operators: eq, ne, gt, lt, ge, le, sw (starts with), co (contains), pr (present), and, or.
@@ -52,17 +42,24 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             Custom Attribute (Exact): {'search': 'profile.employeeNumber eq "12345"'}
             Custom Attribute (Starts With): {'search': 'profile.employeeNumber sw "123"'}
             Custom Attribute (Present): {'search': 'profile.employeeNumber pr'}
+            
         Args:
             query: Simple text search only - use plain names like "Dan" (NOT "firstname:Dan")
             search: SCIM filtering (recommended) - use exact syntax like 'profile.firstName eq "Dan"'
             filter_type: Filter type (status, type, etc.)
             sort_by: Field to sort by
             sort_order: Sort direction (asc or desc)
+            ctx: MCP Context for progress reporting and logging
+            
         Returns:
             Dictionary containing users and pagination information
         """
         try:
             limit = 200
+            
+            if ctx:
+                ctx.info(f"Listing users with parameters: query={query}, search={search}, filter={filter_type}")
+            
             # Validate parameters
             if limit < 1 or limit > 200:
                 raise ValueError("Limit must be between 1 and 200")
@@ -86,20 +83,52 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             if filter_type and not search:
                 params['filter'] = filter_type
             
+            if ctx:
+                ctx.info(f"Executing Okta API request with params: {params}")
+            
             # Execute Okta API request
             raw_response = await okta_client.client.list_users(params)
             users, resp, err = normalize_okta_response(raw_response)
             
             if err:
                 logger.error(f"Error listing users: {err}")
+                if ctx:
+                    ctx.error(f"Error listing users: {err}")
                 return handle_okta_result(err, "list_users")
             
             # Apply pagination based on environment variable
-            all_users, final_resp, final_err, page_count = await paginate_okta_response(users, resp, err)
+            if ctx:
+                ctx.info("Retrieving paginated results...")
             
-            if final_err:
-                logger.error(f"Error during pagination: {final_err}")
-                return handle_okta_result(final_err, "list_users")
+            all_users = []
+            page_count = 0
+            
+            # Process first page
+            if users:
+                all_users.extend(users)
+                page_count += 1
+            
+            # Process additional pages if available
+            while resp and hasattr(resp, 'has_next') and resp.has_next():
+                if ctx:
+                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
+                
+                raw_response = await okta_client.client.list_users_next(resp)
+                users, resp, err = normalize_okta_response(raw_response)
+                
+                if err:
+                    if ctx:
+                        ctx.error(f"Error during pagination: {err}")
+                    break
+                
+                if users:
+                    all_users.extend(users)
+                    page_count += 1
+            
+            if ctx:
+                ctx.info(f"Retrieved {len(all_users)} users across {page_count} pages")
+                await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination information
             result = {
@@ -108,9 +137,9 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                     "limit": limit,
                     "page_count": page_count,
                     "total_results": len(all_users),
-                    "has_more": bool(final_resp.has_next()) if hasattr(final_resp, 'has_next') else False,
-                    "self": final_resp.self if hasattr(final_resp, 'self') else None,
-                    "next": final_resp.next if hasattr(final_resp, 'next') and final_resp.has_next() else None
+                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
+                    "self": resp.self if hasattr(resp, 'self') else None,
+                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
                 }
             }
             
@@ -118,40 +147,57 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         
         except Exception as e:
             logger.exception("Error in list_users tool")
+            if ctx:
+                ctx.error(f"Error in list_users tool: {str(e)}")
             return handle_okta_result(e, "list_users")
     
     @server.tool()
-    async def get_user(user_id: str) -> Dict[str, Any]:
+    async def get_user(user_id: str, ctx: Context = None) -> Dict[str, Any]:
         """Get detailed information about a specific Okta user.
         
         Args:
             user_id: The ID or login of the user to retrieve
+            ctx: MCP Context for logging
             
         Returns:
             Dictionary containing detailed user information
         """
         try:
+            if ctx:
+                ctx.info(f"Getting user info for: {user_id}")
+            
             # Determine if user_id is an ID or a login
             if "@" in user_id:
                 # Assume it's a login (email)
+                if ctx:
+                    ctx.info(f"Identified {user_id} as email login, getting user by login")
                 raw_response = await okta_client.client.get_user_by_login(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
             else:
                 # Assume it's a user ID
+                if ctx:
+                    ctx.info(f"Identified {user_id} as user ID, getting user by ID")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
             
             if err:
                 logger.error(f"Error getting user {user_id}: {err}")
+                if ctx:
+                    ctx.error(f"Error getting user {user_id}: {err}")
                 return handle_okta_result(err, "get_user")
             
             # Format response
             result = user.as_dict()
             
+            if ctx:
+                ctx.info(f"Successfully retrieved user data for {user_id}")
+            
             return result
         
         except Exception as e:
             logger.exception(f"Error in get_user tool for user_id {user_id}")
+            if ctx:
+                ctx.error(f"Error in get_user tool: {str(e)}")
             return handle_okta_result(e, "get_user")
     
     logger.info("Registered user management tools")
