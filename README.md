@@ -113,6 +113,9 @@ The Okta MCP Server currently provides the following tools:
 **User Management**
 - `list_users` - Retrieve a paginated list of users with filtering options
 - `get_user` - Get detailed information about a specific user by ID or login
+- `list_user_groups` - List all groups that a specific user belongs to
+- `list_user_applications` - List all application links (assigned applications) for a specific user
+- `list_user_factors` - List all authentication factors enrolled for a specific user
 
 **Group Operations**
 - `list_groups` - Retrieve groups in your Okta organization with filtering options
