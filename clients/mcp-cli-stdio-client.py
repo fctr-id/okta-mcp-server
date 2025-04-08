@@ -71,11 +71,11 @@ You will have to know the event codes for Okta system log If you don't just say 
         - Factors include: email, SMS, push, security questions, etc.
         - Factors can be active or inactive
 
-        ##Key Columns to use in the queries##
-        - Always use the following columns when answering queries unless more ore less are asked
+        ##Key Columns to provide in output##
+        - Always use the following columns when answering queries unless more more less are asked in the query
         - For user related query Users: email, login, first_name, last_name, status
-        - groups: name, description
-        - applications: label, name, status
+        - groups: name
+        - applications: label, status
         - factors: factor_type, provider, status
         
 """
