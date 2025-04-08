@@ -163,7 +163,25 @@ class ToolRegistry:
             from okta_mcp.tools import group_tools
             self.register_tools_from_module(group_tools, server, client)
         except ImportError:
-            logger.warning("Could not import group_tools module")            
+            logger.warning("Could not import group_tools module")   
+            
+        try:
+            from okta_mcp.tools import apps_tools
+            self.register_tools_from_module(apps_tools, server, client)
+        except ImportError:
+            logger.warning("Could not import apps_tools module")    
+            
+        try:
+            from okta_mcp.tools import datetime_tools
+            self.register_tools_from_module(datetime_tools, server, client)
+        except ImportError:
+            logger.warning("Could not import datetime_tools module")                               
+            
+        try:
+            from okta_mcp.tools import log_events_tools
+            self.register_tools_from_module(log_events_tools, server, client)
+        except ImportError:
+            logger.warning("Could not import log_events_tools module")            
             
         # Additional modules can be added here as they're implemented
         # from okta_mcp.tools import group_tools
