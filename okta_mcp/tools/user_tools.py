@@ -171,7 +171,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 # Assume it's a login (email)
                 if ctx:
                     ctx.info(f"Identified {user_id} as email login, getting user by login")
-                raw_response = await okta_client.client.get_user_by_login(user_id)
+                raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
             else:
                 # Assume it's a user ID
@@ -223,7 +223,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
                     ctx.info(f"Converting login {user_id} to user ID")
-                raw_response = await okta_client.client.get_user_by_login(user_id)
+                raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
@@ -327,7 +327,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
                     ctx.info(f"Converting login {user_id} to user ID")
-                raw_response = await okta_client.client.get_user_by_login(user_id)
+                raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
@@ -400,7 +400,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
                     ctx.info(f"Converting login {user_id} to user ID")
-                raw_response = await okta_client.client.get_user_by_login(user_id)
+                raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
