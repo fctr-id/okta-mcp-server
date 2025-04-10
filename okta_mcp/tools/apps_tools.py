@@ -28,7 +28,14 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
         include_non_deleted: bool = None,
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta applications with various filtering options.
+        """List Okta applications with various filtering options or get a specific application by ID.
+        All application objects in the response include complete nested properties that can be accessed using 
+        standard JSON path notation:
+        Examples of important nested properties:
+        - Credentials signing key ID: credentials.signing.kid
+        - Access Policy ID: The last part of the URL in _links.accessPolicy.href
+        - Profile Enrollment Policy ID: The last part of the URL in _links.profileEnrollment.href
+        - SAML settings: settings.signOn.attributeStatements
         
         Args:
             q: Search term for application name
@@ -248,6 +255,120 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
             if ctx:
                 ctx.error(f"Error in list_application_users tool: {str(e)}")
             return handle_okta_result(e, "list_application_users")
+        
+    @server.tool()
+    async def list_application_group_assignments(
+        application_id: str,
+        limit: int = 200,
+        after: str = None,
+        expand: str = None,
+        ctx: Context = None
+    ) -> Dict[str, Any]:
+        """List groups assigned to a specific Okta application. Fetch the group name once you have the group id using get_group tool
+        
+        All group assignment objects in the response include complete nested properties that can be accessed using 
+        standard JSON path notation. Important properties include the group profile, assignment details,
+        and application-specific settings.
+        
+        Args:
+            application_id: ID of the application to list group assignments for
+            limit: Number of results to return (1-200)
+            after: Pagination cursor
+            expand: Embedded resources to expand in the response
+            ctx: MCP Context for progress reporting and logging
+            
+        Returns:
+            Dictionary containing group assignments and pagination information
+        """
+        try:
+            if ctx:
+                ctx.info(f"Listing group assignments for application ID: {application_id}")
+            
+            # Validate parameters
+            if not application_id:
+                raise ValueError("Application ID is required")
+                
+            if limit < 1 or limit > 200:
+                raise ValueError("Limit must be between 1 and 200")
+                
+            # Prepare request parameters
+            params = {
+                'limit': limit
+            }
+                
+            if after:
+                params['after'] = after
+                
+            if expand:
+                params['expand'] = expand
+            
+            if ctx:
+                ctx.info(f"Executing Okta API request with params: {params}")
+            
+            # Execute Okta API request
+            raw_response = await okta_client.client.list_application_group_assignments(application_id, params)
+            app_groups, resp, err = normalize_okta_response(raw_response)
+            
+            if err:
+                logger.error(f"Error listing application group assignments: {err}")
+                if ctx:
+                    ctx.error(f"Error listing application group assignments: {err}")
+                return handle_okta_result(err, "list_application_group_assignments")
+            
+            # Apply pagination
+            if ctx:
+                ctx.info("Retrieving paginated results...")
+            
+            all_app_groups = []
+            page_count = 0
+            
+            # Process first page
+            if app_groups:
+                all_app_groups.extend(app_groups)
+                page_count += 1
+            
+            # Process additional pages if available
+            while resp and hasattr(resp, 'has_next') and resp.has_next():
+                if ctx:
+                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
+                
+                raw_response = await okta_client.client.get_next_page(resp)
+                app_groups, resp, err = normalize_okta_response(raw_response)
+                
+                if err:
+                    if ctx:
+                        ctx.error(f"Error during pagination: {err}")
+                    break
+                
+                if app_groups:
+                    all_app_groups.extend(app_groups)
+                    page_count += 1
+            
+            if ctx:
+                ctx.info(f"Retrieved {len(all_app_groups)} application group assignments across {page_count} pages")
+                await ctx.report_progress(100, 100)  # Mark as complete
+            
+            # Format response with enhanced pagination info
+            result = {
+                "application_groups": [group.as_dict() for group in all_app_groups],
+                "pagination": {
+                    "limit": limit,
+                    "page_count": page_count,
+                    "total_results": len(all_app_groups),
+                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
+                    "self": resp.self if hasattr(resp, 'self') else None,
+                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                }
+            }
+            
+            return result
+        
+        except Exception as e:
+            logger.exception("Error in list_application_group_assignments tool")
+            if ctx:
+                ctx.error(f"Error in list_application_group_assignments tool: {str(e)}")
+            return handle_okta_result(e, "list_application_group_assignments")        
 
     
     logger.info("Registered application management tools")
