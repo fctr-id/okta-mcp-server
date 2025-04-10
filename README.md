@@ -5,7 +5,7 @@
 </div>
 
 <div align="center">
-  <h2>Okta MCP Server (v0.1.0-ALPHA)</h2>
+  <h2>Okta MCP Server (v0.2.0-ALPHA)</h2>
 </div>
 
 The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
@@ -32,6 +32,8 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 - [🛠️ Available Tools](#️-available-tools)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
+- [🧠 Supported AI Providers](#-supported-ai-providers)
+  - [Currently Supported Providers:](#currently-supported-providers)
   - [Installation](#installation)
   - [Configuration \& Usage](#configuration--usage)
   - [Supported Transports and Launching](#supported-transports-and-launching)
@@ -124,7 +126,13 @@ The Okta MCP Server currently provides the following tools:
 - `list_assigned_applications_for_group` - List all applications assigned to a specific group
 
 **Application Management**
-- `list_applications` - Retrieve applications with filtering, search, and pagination options
+- `list_applications` - Retrieve applications with filtering, search, and pagination options. Can retrieve all nested properties (credentials, settings, policies, keys, URLs ..etc) 
+- `list_application_users` - List all users assigned to a specific application
+- `list_application_group_assignments` - List all groups assigned to a specific application
+
+**Policy & Network Management**
+- `list_policy_rules` - List all rules for a specific policy with detailed conditions and actions
+- `list_network_zones` - List all network zones with IP ranges and configuration details
 
 **System Log Events**
 - `get_logs` - Retrieve Okta system log events with time-based, filter, and search options
@@ -146,6 +154,20 @@ The Okta MCP Server currently provides the following tools:
 > - Claude 3.7 Sonnet
 >
 > You must use latest model versions that explicitly support tool calling/function calling capabilities. Older models or models without tool calling support will not be able to interact with the Okta MCP Server.
+
+## 🧠 Supported AI Providers
+
+The Okta MCP Server supports multiple AI providers through its flexible configuration system. This allows you to connect to various large language models based on your specific needs and existing access.
+
+### Currently Supported Providers:
+
+| Provider | Environment Variable | Description |
+|----------|---------------------|-------------|
+| **OpenAI** | `AI_PROVIDER=openai` | Connect to OpenAI API with models like GPT-4o. Requires an OpenAI API key. |
+| **Azure OpenAI** | `AI_PROVIDER=azure_openai` | Use Azure-hosted OpenAI models with enhanced security and compliance features. |
+| **Anthropic** | `AI_PROVIDER=anthropic` | Connect to Anthropic's Claude models (primarily tested with Claude 3.7 Sonnet). |
+| **Google Vertex AI** | `AI_PROVIDER=vertex_ai` | Use Google's Gemini models via Vertex AI. Requires Google Cloud service account. |
+| **OpenAI Compatible** | `AI_PROVIDER=openai_compatible` | Connect to any OpenAI API-compatible endpoint, such as Fireworks.ai, Ollama, or other providers that implement the OpenAI API specification. |
 
 ### Installation
 
