@@ -1,22 +1,40 @@
 """Utility functions for working with Pydantic-AI models."""
 
 import os
+import json
 from enum import Enum
 from dotenv import load_dotenv
-from typing import Any
+from typing import Any, Dict
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.models.gemini import GeminiModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.google_vertex import GoogleVertexProvider
 from openai import AsyncAzureOpenAI
+from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.providers.anthropic import AnthropicProvider
+import httpx
 
 load_dotenv()
+
+def parse_headers() -> Dict[str, str]:
+    """Parse the CUSTOM_HTTP_HEADERS environment variable into a dictionary."""
+    headers_str = os.getenv('CUSTOM_HTTP_HEADERS')
+    if not headers_str:
+        return {}
+        
+    try:
+        # Parse the JSON string into a Python dictionary
+        return json.loads(headers_str)
+    except json.JSONDecodeError as e:
+        print(f"Error parsing CUSTOM_HTTP_HEADERS: {e}")
+        return {}
 
 class AIProvider(str, Enum):
     VERTEX_AI = "vertex_ai"
     OPENAI = "openai"
     AZURE_OPENAI = "azure_openai"
     OPENAI_COMPATIBLE = "openai_compatible"
+    ANTHROPIC = "anthropic"
 
 def get_model() -> Any:
     """Initialize and return the appropriate LLM model based on environment settings."""
@@ -37,16 +55,21 @@ def get_model() -> Any:
         return GeminiModel(model_name, provider=vertex_provider)
     
     elif provider == AIProvider.OPENAI_COMPATIBLE:
+        custom_headers = parse_headers()
+        client = httpx.AsyncClient(verify=False, headers=custom_headers)
+        
+        # Create OpenAI compatible provider with http_client directly in constructor
         openai_compat_provider = OpenAIProvider(
             base_url=os.getenv('OPENAI_COMPATIBLE_BASE_URL'),
-            api_key=os.getenv('OPENAI_COMPATIBLE_TOKEN')
+            api_key=os.getenv('OPENAI_COMPATIBLE_TOKEN'),
+            http_client=client
         )
         
         reasoning_model_name = os.getenv('OPENAI_COMPATIBLE_REASONING_MODEL')
         
         return OpenAIModel(
             model_name=reasoning_model_name,
-            provider=openai_compat_provider
+            provider=openai_compat_provider,
         )
         
     elif provider == AIProvider.AZURE_OPENAI:
@@ -72,6 +95,20 @@ def get_model() -> Any:
             
         openai_provider = OpenAIProvider(api_key=api_key)
         return OpenAIModel(model_name=model_name, provider=openai_provider)
+
+    elif provider == AIProvider.ANTHROPIC:
+        # Get API key from environment
+        api_key = os.getenv('ANTHROPIC_API_KEY')
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is required for Anthropic provider")
+        
+        # Get model name with default
+        model_name = os.getenv('ANTHROPIC_MODEL_NAME', 'claude-3-5-sonnet-latest')
+        
+        # Create and return the model
+        return AnthropicModel(
+            model_name=model_name
+        )    
     
     else:
         # Default to OpenAI if provider not recognized
