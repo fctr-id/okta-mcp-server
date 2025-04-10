@@ -181,7 +181,13 @@ class ToolRegistry:
             from okta_mcp.tools import log_events_tools
             self.register_tools_from_module(log_events_tools, server, client)
         except ImportError:
-            logger.warning("Could not import log_events_tools module")            
+            logger.warning("Could not import log_events_tools module") 
+
+        try:
+            from okta_mcp.tools import policy_network_tools
+            self.register_tools_from_module(policy_network_tools, server, client)
+        except ImportError:
+            logger.warning("Could not import polciy_network_tools module")                        
             
         # Additional modules can be added here as they're implemented
         # from okta_mcp.tools import group_tools
