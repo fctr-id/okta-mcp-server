@@ -58,7 +58,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = 200
             
             if ctx:
-                ctx.info(f"Listing users with parameters: query={query}, search={search}, filter={filter_type}")
+                await ctx.info(f"Listing users with parameters: query={query}, search={search}, filter={filter_type}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -84,7 +84,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['filter'] = filter_type
             
             if ctx:
-                ctx.info(f"Executing Okta API request with params: {params}")
+                await ctx.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_users(params)
@@ -93,12 +93,12 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing users: {err}")
                 if ctx:
-                    ctx.error(f"Error listing users: {err}")
+                    await ctx.error(f"Error listing users: {err}")
                 return handle_okta_result(err, "list_users")
             
             # Apply pagination based on environment variable
             if ctx:
-                ctx.info("Retrieving paginated results...")
+                await ctx.info("Retrieving paginated results...")
             
             all_users = []
             page_count = 0
@@ -111,7 +111,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.list_users_next(resp)
@@ -119,7 +119,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        ctx.error(f"Error during pagination: {err}")
+                        await ctx.error(f"Error during pagination: {err}")
                     break
                 
                 if users:
@@ -127,7 +127,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
             
             if ctx:
-                ctx.info(f"Retrieved {len(all_users)} users across {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_users)} users across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination information
@@ -148,7 +148,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception("Error in list_users tool")
             if ctx:
-                ctx.error(f"Error in list_users tool: {str(e)}")
+                await ctx.error(f"Error in list_users tool: {str(e)}")
             return handle_okta_result(e, "list_users")
     
     @server.tool()
@@ -164,40 +164,40 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                ctx.info(f"Getting user info for: {user_id}")
+                await ctx.info(f"Getting user info for: {user_id}")
             
             # Determine if user_id is an ID or a login
             if "@" in user_id:
                 # Assume it's a login (email)
                 if ctx:
-                    ctx.info(f"Identified {user_id} as email login, getting user by login")
+                    await ctx.info(f"Identified {user_id} as email login, getting user by login")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
             else:
                 # Assume it's a user ID
                 if ctx:
-                    ctx.info(f"Identified {user_id} as user ID, getting user by ID")
+                    await ctx.info(f"Identified {user_id} as user ID, getting user by ID")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
             
             if err:
                 logger.error(f"Error getting user {user_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error getting user {user_id}: {err}")
+                    await ctx.error(f"Error getting user {user_id}: {err}")
                 return handle_okta_result(err, "get_user")
             
             # Format response
             result = user.as_dict()
             
             if ctx:
-                ctx.info(f"Successfully retrieved user data for {user_id}")
+                await ctx.info(f"Successfully retrieved user data for {user_id}")
             
             return result
         
         except Exception as e:
             logger.exception(f"Error in get_user tool for user_id {user_id}")
             if ctx:
-                ctx.error(f"Error in get_user tool: {str(e)}")
+                await ctx.error(f"Error in get_user tool: {str(e)}")
             return handle_okta_result(e, "get_user")
         
     @server.tool()
@@ -216,20 +216,20 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                ctx.info(f"Listing groups for user: {user_id}")
+                await ctx.info(f"Listing groups for user: {user_id}")
             
             # Normalize user_id (handle email/login case)
             if "@" in user_id:
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
-                    ctx.info(f"Converting login {user_id} to user ID")
+                    await ctx.info(f"Converting login {user_id} to user ID")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
                     logger.error(f"Error getting user {user_id}: {err}")
                     if ctx:
-                        ctx.error(f"Error getting user {user_id}: {err}")
+                        await ctx.error(f"Error getting user {user_id}: {err}")
                     return handle_okta_result(err, "list_user_groups")
                     
                 # Extract the actual user ID
@@ -237,7 +237,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
             # Execute Okta API request to get user's groups
             if ctx:
-                ctx.info(f"Fetching groups for user ID: {user_id}")
+                await ctx.info(f"Fetching groups for user ID: {user_id}")
                 
             raw_response = await okta_client.client.list_user_groups(user_id)
             groups, resp, err = normalize_okta_response(raw_response)
@@ -245,12 +245,12 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing groups for user {user_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error listing groups for user {user_id}: {err}")
+                    await ctx.error(f"Error listing groups for user {user_id}: {err}")
                 return handle_okta_result(err, "list_user_groups")
             
             # Apply pagination based on environment variable
             if ctx:
-                ctx.info("Retrieving paginated results...")
+                await ctx.info("Retrieving paginated results...")
             
             all_groups = []
             page_count = 0
@@ -263,7 +263,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.list_user_groups_next(resp)
@@ -271,7 +271,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        ctx.error(f"Error during pagination: {err}")
+                        await ctx.error(f"Error during pagination: {err}")
                     break
                 
                 if groups:
@@ -279,7 +279,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
             
             if ctx:
-                ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination information
@@ -299,7 +299,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_user_groups tool for user_id {user_id}")
             if ctx:
-                ctx.error(f"Error in list_user_groups tool: {str(e)}")
+                await ctx.error(f"Error in list_user_groups tool: {str(e)}")
             return handle_okta_result(e, "list_user_groups")       
         
     @server.tool()
@@ -320,20 +320,20 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                ctx.info(f"Listing app links for user: {user_id}")
+                await ctx.info(f"Listing app links for user: {user_id}")
             
             # Normalize user_id (handle email/login case)
             if "@" in user_id:
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
-                    ctx.info(f"Converting login {user_id} to user ID")
+                    await ctx.info(f"Converting login {user_id} to user ID")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
                     logger.error(f"Error getting user {user_id}: {err}")
                     if ctx:
-                        ctx.error(f"Error getting user {user_id}: {err}")
+                        await ctx.error(f"Error getting user {user_id}: {err}")
                     return handle_okta_result(err, "list_app_links")
                     
                 # Extract the actual user ID
@@ -341,7 +341,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
             # Execute Okta API request to get user's app links
             if ctx:
-                ctx.info(f"Fetching app links for user ID: {user_id}")
+                await ctx.info(f"Fetching app links for user ID: {user_id}")
             
             # Prepare request parameters
             params = {}
@@ -354,13 +354,13 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing app links for user {user_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error listing app links for user {user_id}: {err}")
+                    await ctx.error(f"Error listing app links for user {user_id}: {err}")
                 return handle_okta_result(err, "list_app_links")
             
             # For app links, no need for pagination as it's returned as a single list
             
             if ctx:
-                ctx.info(f"Retrieved {len(app_links) if app_links else 0} app links for user {user_id}")
+                await ctx.info(f"Retrieved {len(app_links) if app_links else 0} app links for user {user_id}")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response
@@ -374,7 +374,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_app_links tool for user_id {user_id}")
             if ctx:
-                ctx.error(f"Error in list_app_links tool: {str(e)}")
+                await ctx.error(f"Error in list_app_links tool: {str(e)}")
             return handle_okta_result(e, "list_app_links")
         
     @server.tool()
@@ -393,20 +393,20 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                ctx.info(f"Listing authentication factors for user: {user_id}")
+                await ctx.info(f"Listing authentication factors for user: {user_id}")
             
             # Normalize user_id (handle email/login case)
             if "@" in user_id:
                 # If it's an email/login, we need to get the user ID first
                 if ctx:
-                    ctx.info(f"Converting login {user_id} to user ID")
+                    await ctx.info(f"Converting login {user_id} to user ID")
                 raw_response = await okta_client.client.get_user(user_id)
                 user, resp, err = normalize_okta_response(raw_response)
                 
                 if err:
                     logger.error(f"Error getting user {user_id}: {err}")
                     if ctx:
-                        ctx.error(f"Error getting user {user_id}: {err}")
+                        await ctx.error(f"Error getting user {user_id}: {err}")
                     return handle_okta_result(err, "list_user_factors")
                     
                 # Extract the actual user ID
@@ -414,7 +414,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
             # Execute Okta API request to get user's factors
             if ctx:
-                ctx.info(f"Fetching authentication factors for user ID: {user_id}")
+                await ctx.info(f"Fetching authentication factors for user ID: {user_id}")
                 
             raw_response = await okta_client.client.list_factors(user_id)
             factors, resp, err = normalize_okta_response(raw_response)
@@ -422,13 +422,13 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing factors for user {user_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error listing factors for user {user_id}: {err}")
+                    await ctx.error(f"Error listing factors for user {user_id}: {err}")
                 return handle_okta_result(err, "list_user_factors")
             
             # For factors, we typically don't need pagination as they come in a single response
             
             if ctx:
-                ctx.info(f"Retrieved {len(factors) if factors else 0} authentication factors")
+                await ctx.info(f"Retrieved {len(factors) if factors else 0} authentication factors")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response
@@ -442,7 +442,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_user_factors tool for user_id {user_id}")
             if ctx:
-                ctx.error(f"Error in list_user_factors tool: {str(e)}")
+                await ctx.error(f"Error in list_user_factors tool: {str(e)}")
             return handle_okta_result(e, "list_user_factors")                 
     
     logger.info("Registered user management tools")

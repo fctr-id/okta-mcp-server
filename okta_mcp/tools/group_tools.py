@@ -44,7 +44,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = 200
             
             if ctx:
-                ctx.info(f"Listing groups with parameters: query={query}, filter={filter_type}, name={name}, type={type}")
+                await ctx.info(f"Listing groups with parameters: query={query}, filter={filter_type}, name={name}, type={type}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -75,7 +75,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                ctx.info(f"Executing Okta API request with params: {params}")
+                await ctx.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_groups(params)
@@ -84,12 +84,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing groups: {err}")
                 if ctx:
-                    ctx.error(f"Error listing groups: {err}")
+                    await ctx.error(f"Error listing groups: {err}")
                 return handle_okta_result(err, "list_groups")
             
             # Apply pagination
             if ctx:
-                ctx.info("Retrieving paginated results...")
+                await ctx.info("Retrieving paginated results...")
             
             all_groups = []
             page_count = 0
@@ -99,12 +99,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 all_groups.extend(groups)
                 page_count += 1
                 if ctx:
-                    ctx.info(f"Retrieved {len(groups)} groups")
+                    await ctx.info(f"Retrieved {len(groups)} groups")
             
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.list_groups_next(resp)
@@ -112,17 +112,17 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        ctx.error(f"Error during pagination: {err}")
+                        await ctx.error(f"Error during pagination: {err}")
                     break
                 
                 if groups:
                     all_groups.extend(groups)
                     page_count += 1
                     if ctx:
-                        ctx.info(f"Retrieved {len(groups)} additional groups")
+                        await ctx.info(f"Retrieved {len(groups)} additional groups")
             
             if ctx:
-                ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -143,7 +143,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception("Error in list_groups tool")
             if ctx:
-                ctx.error(f"Error in list_groups tool: {str(e)}")
+                await ctx.error(f"Error in list_groups tool: {str(e)}")
             return handle_okta_result(e, "list_groups")
     
     @server.tool()
@@ -159,7 +159,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                ctx.info(f"Getting detailed information for group: {group_id}")
+                await ctx.info(f"Getting detailed information for group: {group_id}")
             
             # Get the group by ID
             raw_response = await okta_client.client.get_group(group_id)
@@ -168,11 +168,11 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error getting group {group_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error getting group {group_id}: {err}")
+                    await ctx.error(f"Error getting group {group_id}: {err}")
                 return handle_okta_result(err, "get_group")
             
             if ctx:
-                ctx.info(f"Successfully retrieved group information")
+                await ctx.info(f"Successfully retrieved group information")
             
             # Format response
             result = group.as_dict()
@@ -182,7 +182,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in get_group tool for group_id {group_id}")
             if ctx:
-                ctx.error(f"Error in get_group tool: {str(e)}")
+                await ctx.error(f"Error in get_group tool: {str(e)}")
             return handle_okta_result(e, "get_group")
     
     @server.tool()
@@ -205,7 +205,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = 200
             
             if ctx:
-                ctx.info(f"Listing members of group: {group_id}")
+                await ctx.info(f"Listing members of group: {group_id}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -220,7 +220,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                ctx.info(f"Executing Okta API request for group members")
+                await ctx.info(f"Executing Okta API request for group members")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_group_users(group_id, params)
@@ -229,12 +229,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing group members for group {group_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error listing group members: {err}")
+                    await ctx.error(f"Error listing group members: {err}")
                 return handle_okta_result(err, "list_group_users")
             
             # Apply pagination
             if ctx:
-                ctx.info("Retrieving paginated results...")
+                await ctx.info("Retrieving paginated results...")
             
             all_users = []
             page_count = 0
@@ -244,12 +244,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 all_users.extend(users)
                 page_count += 1
                 if ctx:
-                    ctx.info(f"Retrieved {len(users)} members")
+                    await ctx.info(f"Retrieved {len(users)} members")
             
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.list_group_users_next(resp)
@@ -257,17 +257,17 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        ctx.error(f"Error during pagination: {err}")
+                        await ctx.error(f"Error during pagination: {err}")
                     break
                 
                 if users:
                     all_users.extend(users)
                     page_count += 1
                     if ctx:
-                        ctx.info(f"Retrieved {len(users)} additional members")
+                        await ctx.info(f"Retrieved {len(users)} additional members")
             
             if ctx:
-                ctx.info(f"Retrieved {len(all_users)} total members across {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_users)} total members across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -289,7 +289,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_group_members tool for group_id {group_id}")
             if ctx:
-                ctx.error(f"Error in list_group_members tool: {str(e)}")
+                await ctx.error(f"Error in list_group_members tool: {str(e)}")
             return handle_okta_result(e, "list_group_members")
         
     @server.tool()
@@ -312,7 +312,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = 200
             
             if ctx:
-                ctx.info(f"Listing applications assigned to group: {group_id}")
+                await ctx.info(f"Listing applications assigned to group: {group_id}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -327,7 +327,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                ctx.info(f"Executing Okta API request for group applications")
+                await ctx.info(f"Executing Okta API request for group applications")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_assigned_applications_for_group(group_id, params)
@@ -336,12 +336,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing applications for group {group_id}: {err}")
                 if ctx:
-                    ctx.error(f"Error listing applications: {err}")
+                    await ctx.error(f"Error listing applications: {err}")
                 return handle_okta_result(err, "list_assigned_applications")
             
             # Apply pagination
             if ctx:
-                ctx.info("Retrieving paginated results...")
+                await ctx.info("Retrieving paginated results...")
             
             all_apps = []
             page_count = 0
@@ -351,12 +351,12 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 all_apps.extend(apps)
                 page_count += 1
                 if ctx:
-                    ctx.info(f"Retrieved {len(apps)} applications")
+                    await ctx.info(f"Retrieved {len(apps)} applications")
             
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate
                 
                 raw_response = await okta_client.client.list_assigned_applications_for_group_next(resp)
@@ -364,17 +364,17 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        ctx.error(f"Error during pagination: {err}")
+                        await ctx.error(f"Error during pagination: {err}")
                     break
                 
                 if apps:
                     all_apps.extend(apps)
                     page_count += 1
                     if ctx:
-                        ctx.info(f"Retrieved {len(apps)} additional applications")
+                        await ctx.info(f"Retrieved {len(apps)} additional applications")
             
             if ctx:
-                ctx.info(f"Retrieved {len(all_apps)} total applications across {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_apps)} total applications across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -396,7 +396,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_assigned_applications tool for group_id {group_id}")
             if ctx:
-                ctx.error(f"Error in list_assigned_applications tool: {str(e)}")
+                await ctx.error(f"Error in list_assigned_applications tool: {str(e)}")
             return handle_okta_result(e, "list_assigned_applications")
     
     logger.info("Registered group management tools")
