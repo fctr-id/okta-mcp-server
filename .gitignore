@@ -8,4 +8,6 @@ logs/mcp_protocol.log
 examples/iamse.md
 clients/node_modules/
 examples/iamse.md
-logs/okta_mcp_server.log
+logs/
+clients/mcl-cli-stdio-hybrid-client.py
+okta_mcp/utils/mcp_transport.py

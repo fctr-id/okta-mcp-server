@@ -15,58 +15,60 @@ class ISO8601Formatter(logging.Formatter):
         dt = datetime.datetime.fromtimestamp(record.created)
         return dt.strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
 
-def configure_logging(log_level=os.getenv("LOG_LEVEL", "INFO").upper()):
+def configure_logging(log_level=None, console_level=None):
     """
-    Configure logging to both console and file with rotation.
+    Configure root logging for the application.
     
     Args:
-        log_level: Logging level (default: INFO)
-        
+        log_level: The log level for file output (defaults to LOG_LEVEL env var or INFO)
+        console_level: The log level for console output (defaults to INFO or higher)
+    
     Returns:
-        Logger instance
+        The configured root logger
     """
-    # Find the project root by going up from the current file location 
-    # instead of using the current working directory
-    current_file = Path(__file__)  # Get the path of this logging.py file
-    project_root = current_file.parent.parent.parent  # Navigate up to root
+    # Determine log levels from environment or parameters
+    if log_level is None:
+        log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+        log_level = getattr(logging, log_level_str, logging.INFO)
     
-    # Create logs directory in project root
-    log_path = project_root / "logs"
-    log_path.mkdir(exist_ok=True)
+    # For console, default to INFO if LOG_LEVEL is DEBUG, otherwise use LOG_LEVEL
+    if console_level is None:
+        console_level = max(logging.INFO, log_level) if log_level_str != 'DEBUG' else logging.INFO
     
-    # Define log file path
-    log_file = log_path / "okta_mcp_server.log"
+    # Configure the root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(min(log_level, console_level))  # Set to the more verbose level
     
-    # Create custom ISO8601 formatter
-    formatter = ISO8601Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
+    # Remove any existing handlers to avoid duplicates
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
     
-    # Set up file handler with rotation (10MB files, keep 5 backups)
-    file_handler = RotatingFileHandler(
-        log_file, 
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
+    
+    # Create and add console handler with the specified console level
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(console_level)  # Important: Console only gets INFO or higher
+    root_logger.addHandler(console_handler)
+    
+    # Create and add file handler with the file log level
+    log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../logs'))
+    os.makedirs(log_dir, exist_ok=True)
+    
+    file_handler = logging.handlers.RotatingFileHandler(
+        os.path.join(log_dir, 'app.log'),
         maxBytes=10*1024*1024,  # 10MB
         backupCount=5
     )
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(log_level)
-    
-    # Set up console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(log_level)
-    
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(log_level)
-    
-    # Remove existing handlers to avoid duplicates
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-        
-    # Add handlers
+    file_handler.setLevel(log_level)  # File gets the full log level (can be DEBUG)
     root_logger.addHandler(file_handler)
-    root_logger.addHandler(console_handler)
     
-    # Create server logger
-    logger = logging.getLogger("okta_mcp_server")
+    # Configure third-party loggers (make sure they respect our console level)
+    for logger_name in ['asyncio', 'openai', 'httpx', 'pydantic_ai', 'json', 'requests']:
+        third_party_logger = logging.getLogger(logger_name)
+        third_party_logger.setLevel(log_level)  # They can log at the file level
+        third_party_logger.propagate = True     # But they should use our handlers
     
-    return logger
+    return root_logger
