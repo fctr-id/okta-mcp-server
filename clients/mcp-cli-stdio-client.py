@@ -138,7 +138,7 @@ def load_env_vars():
     return all_vars
 
 # Server configuration
-PYTHON_PATH = "../venv/Scripts/python"
+PYTHON_PATH = "python"
 SERVER_SCRIPT = "../main.py"
 
 ENV_VARS = load_env_vars()
