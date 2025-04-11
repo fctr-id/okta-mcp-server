@@ -20,7 +20,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
     """
     
     @server.tool()
-    async def list_users(
+    async def list_okta_users(
         query: str = None,
         search: str = None, 
         filter_type: str = None,
@@ -152,7 +152,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_users")
     
     @server.tool()
-    async def get_user(user_id: str, ctx: Context = None) -> Dict[str, Any]:
+    async def get_okta_user(user_id: str, ctx: Context = None) -> Dict[str, Any]:
         """Get detailed information about a specific Okta user.
         
         Args:
@@ -201,7 +201,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "get_user")
         
     @server.tool()
-    async def list_user_groups(
+    async def list_okta_user_groups(
         user_id: str,
         ctx: Context = None
     ) -> Dict[str, Any]:
@@ -303,7 +303,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_user_groups")       
         
     @server.tool()
-    async def list_user_applications(
+    async def list_okta_user_applications(
         user_id: str,
         show_all: bool = True,
         ctx: Context = None
@@ -378,7 +378,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_app_links")
         
     @server.tool()
-    async def list_user_factors(
+    async def list_okta_user_factors(
         user_id: str,
         ctx: Context = None
     ) -> Dict[str, Any]:

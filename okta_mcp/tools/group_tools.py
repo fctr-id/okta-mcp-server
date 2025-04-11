@@ -19,7 +19,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     """
     
     @server.tool()
-    async def list_groups(
+    async def list_okta_groups(
         query: str = None,
         filter_type: str = None,
         name: str = None,
@@ -147,7 +147,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_groups")
     
     @server.tool()
-    async def get_group(group_id: str, ctx: Context = None) -> Dict[str, Any]:
+    async def get_okta_group(group_id: str, ctx: Context = None) -> Dict[str, Any]:
         """Get detailed information about a specific Okta group.
         
         Args:
@@ -186,7 +186,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "get_group")
     
     @server.tool()
-    async def list_group_members(
+    async def list_okta_group_members(
         group_id: str,
         after: str = None,
         ctx: Context = None
@@ -293,7 +293,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_group_members")
         
     @server.tool()
-    async def list_assigned_applications_for_group(
+    async def list_okta_assigned_applications_for_group(
         group_id: str,
         after: str = None,
         ctx: Context = None

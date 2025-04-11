@@ -20,7 +20,7 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
     """
     
     @server.tool()
-    async def list_applications(
+    async def list_okta_applications(
         q: str = None,
         filter_string: str = None,
         after: str = None,
@@ -147,7 +147,7 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_applications")
     
     @server.tool()
-    async def list_application_users(
+    async def list_okta_application_users(
         application_id: str,
         limit: int = 200,
         after: str = None,
@@ -257,7 +257,7 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_application_users")
         
     @server.tool()
-    async def list_application_group_assignments(
+    async def list_okta_application_group_assignments(
         application_id: str,
         limit: int = 200,
         after: str = None,

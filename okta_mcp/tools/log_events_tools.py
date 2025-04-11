@@ -51,7 +51,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
     """
     
     @server.tool()
-    async def get_logs(
+    async def get_okta_event_logs(
         since: str = None,
         until: str = None,
         filter_string: str = None,

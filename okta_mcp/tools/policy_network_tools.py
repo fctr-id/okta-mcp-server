@@ -54,7 +54,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
     """
     
     @server.tool()
-    async def list_policy_rules(
+    async def list_okta_policy_rules(
         policy_id: str,
         after: str = None,
         limit: int = 50,
@@ -63,9 +63,9 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         """List all rules for a specific Okta policy.
         All policy rule objects in the response include complete nested properties that can be accessed using standard JSON path notation. 
         Common properties to pay attention to include: name, priority (lower is higher), conditions, actions (factormode) and constranints (what type is required) and zone Ids(network.connection.include) which is an array of zone ids.
-        Once you extract the details , create a human readable summary to return to the user. Use list_network_zones tool to get the details of the network zone details by using the zone id .
+        Once you extract the details , create a human readable summary to return to the user. Use list_okta_network_zones tool to get the details of the network zone details by using the zone id .
                 For example, list_network_zones(args='{"filter_type":"id eq \"nzondmw5liMu8IdyB5d7\""}')
-        -you MUST alwaus use the get_policy_rule tool to to fetch the details of the rule and look at actions.appSignOn.constraints and fetch the method values under authenticationMethods 
+        -you MUST alwaus use the get_okta_policy_rule tool to to fetch the details of the rule and look at actions.appSignOn.constraints and fetch the method values under authenticationMethods 
         
         Args:
             policy_id: The ID of the policy to list rules for
@@ -162,13 +162,12 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_policy_rules")
         
     @server.tool()
-    async def get_policy_rule(
+    async def get_okta_policy_rule(
         policy_id: str,
         rule_id: str,
         ctx: Context = None
     ) -> Dict[str, Any]:
         """Get detailed information about a specific Okta policy rule.
-        
         Policy rules define the conditions and actions applied to authentication, authorization,
         and other security behaviors in Okta. This tool allows you to retrieve complete details
         about a specific rule within a policy, including all nested properties accessible via JSON path notation.
@@ -241,7 +240,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "get_policy_rule")    
         
     @server.tool()
-    async def list_network_zones(
+    async def list_okta_network_zones(
         filter_type: str = None,
         after: str = None,
         limit: int = 50,
