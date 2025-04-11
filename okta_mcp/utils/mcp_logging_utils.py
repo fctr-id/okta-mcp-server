@@ -329,26 +329,3 @@ class LoggingMCPServerStdio(MCPServerStdio):
         setattr(self, method_name, wrapped_method)
         self.protocol_logger.info(f"Successfully wrapped method: {method_name}")
         self.fs_logger.info(f"Successfully wrapped method: {method_name}")
-
-class MessageHandler:
-    """Hook to capture messages directly from the network layer."""
-    
-    @staticmethod
-    async def capture_jsonrpc(func):
-        """Decorator to capture JSONRPC messages."""
-        protocol_logger = logging.getLogger("okta-mcp-server")
-        fs_logger = logging.getLogger("filesystem")
-        
-        async def wrapper(*args, **kwargs):
-            # Try to extract the message
-            message = None
-            if args and len(args) > 0:
-                message = args[0]
-            
-            if message and isinstance(message, dict):
-                msg_str = json.dumps(message, default=str)
-                protocol_logger.info(f"JSONRPC message: {msg_str}")
-                fs_logger.info(f"JSONRPC message: {msg_str}")
-            
-            return await func(*args, **kwargs)
-        return wrapper
