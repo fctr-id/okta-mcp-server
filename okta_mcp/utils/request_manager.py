@@ -26,7 +26,7 @@ class RequestManager:
         self.active_requests = 0
         self.request_queue = asyncio.Queue()
         self.lock = asyncio.Lock()
-        logger.info(f"RequestManager initialized with concurrent limit of {concurrent_limit}")
+        logger.debug(f"RequestManager initialized with concurrent limit of {concurrent_limit}")
         
     async def execute(self, func: Callable[..., Awaitable[T]], *args, **kwargs) -> T:
         """
