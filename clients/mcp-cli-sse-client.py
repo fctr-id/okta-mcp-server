@@ -4,7 +4,7 @@ Connects to an Okta MCP server and uses PydanticAI to process queries.
 Shows detailed message exchange between LLM and MCP server.
 """
 
-import os
+import os, sys
 import json
 import asyncio
 import logging
@@ -17,18 +17,18 @@ from rich.table import Table
 from rich.syntax import Syntax
 from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai.models.gemini import GeminiModel
-from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.providers.google_vertex import GoogleVertexProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.mcp import MCPServerHTTP
-from openai import AsyncAzureOpenAI
 
 # Load environment variables at startup
 load_dotenv()
 
 # Configure rich console for pretty output
 console = Console()
+
+# Add the parent directory to sys.path to enable imports
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from okta_mcp.utils.model_provider import get_model
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,16 +40,46 @@ DEBUG_MODE = logger.getEffectiveLevel() <= logging.DEBUG
 # Server connection parameters for SSE
 SERVER_URL = "http://localhost:3000/sse"
 
-system_prompt="""
-You are a an expert in Okta identity management suite especially with Okta's python SDK utilities. You understand the the OKTA APIs and how identities work in an enterprise environment.
-Since this is a technical AI agent , your responses should be output in JSON format. no other words or characters should be present in the output.
-Do NOT summarize or explain the output. Just give the JSON output.
-When passing groups or users to the API, you have to just use the name provided in the query . Do not append any other words or charactares to the name.
-Every entity in OKTA has a unique ID. You have to get the ID first using the list_ or get_ tools 
-You will have to know the event codes for Okta system log If you don't just say I do not know the event codes and cannot help you with that query
+system_prompt = """
+    ## Role & Expertise
+    You are an expert Okta AI assistant using Okta Python SDK tools. You understand Okta APIs, identities, groups, applications, policies, and factors in an enterprise setting.
+
+    ## Core Objective
+    Accurately answer Okta-related queries by using the provided tools to fetch data and strictly adhere to the output formats defined below.
+    
+    ## Output Formatting
+
+    1.  **Default:** **STRICTLY JSON.** Output ONLY valid JSON. No explanations, summaries, or extra text unless specified otherwise.
+        ```json
+        { "results": [...] }
+        ```
+    2.  **Exception - Auth Policy/Access Rules:** When asked about **application access requirements** (e.g., "Do I need MFA?", "VPN required?") or directly about **Authentication Policies/Rules**:
+        *   Provide a **human-readable summary** explaining each relevant rule's conditions (network, group, risk, etc.) and outcomes (allow, deny, require factor).
+        *   Do **NOT** output the raw policy/rule JSON for these summaries.
+    3.  **Errors:** Use a JSON error format: `{ "error": "Description of error." }`. If you lack specific knowledge (like event codes), state that: `{ "error": "I do not have knowledge of specific Okta event codes." }`    
+    
+    ## Handling Specific Query Types
+
+        1.  **Application Access Questions ("Can user X access app Y?", "What's needed for app Z?"):**
+            *   **YOU MUST FOLLOW THESE STEPS and PROVIDE THE RESPONSE in MARKDOWN:**
+                *   list_okta_users_tool and make sure the user exists and is in ACTIVE state. If Not, stop here and report the issue
+                *   Application ID (prioritize ACTIVE apps unless specified) and list if the app is not ACTIVE and Stop.
+                *   Groups assigned to the application.
+                *   Authentication Policy applied to the application and list_okta_policy_rules
+                *   **For each Policy Rule:** Use the `get_okta_policy_rule` tool **on the rule itself** to get detailed conditions and required factors/factor names.
+                *   If a user is specified: fetch the user's groups and factors using `list_okta_groups_tool` and `list_okta_factors_tool`.
+            *   **MUST Respond With:**
+                *   The human-readable summary of the applicable policy rules (as per Output Rule #2).
+                *   A statement listing the required group(s) for app access.
+                *   If user specified: Compare user's groups/factors to requirements and state if they *appear* to meet them based *only* on fetched data.
+            *   **DO NOT** show the raw JSON for the user's groups or factors in the final output for these access questions. Structure the combined summary/group info/user assessment clearly (e.g., within a structured JSON response).    
+            
+        2. If asked anythin question regarding logs or evemts or activity where you have to use the get_okta_event_logs ttol, make sure you know what event codes to search. If you are unsure let the user know that they have to provide specific event codes to search for    
 
         ### Core Concepts ###
-    
+        
+    NOTE: Make ssure you use list_okta_ tools to first get okta unique entity ID and then use the get_okta otools with that ID to get additonal information    
+        
     1. User Access:
         - Users can access applications through direct assignment or group membership
         - DO NOT show application assignments when asked about users unless specifically asked about it
@@ -62,6 +92,8 @@ You will have to know the event codes for Okta system log If you don't just say 
         - Applications can be active or inactive
         - Always prefer ACTIVE applications only unless specified
         - Applications can be assigned to users directly or to groups
+        - APplications are assigned to Policies and polciies can have multiple rules 
+        - Each rule will have conditions and also the 2 factors that are required for the rule to be satisfied
     
     3. Groups:
         - Groups can be assigned to applications
@@ -78,84 +110,9 @@ You will have to know the event codes for Okta system log If you don't just say 
         - groups: name
         - applications: label, status
         - factors: factor_type, provider, status
+        - Access / Authentication policy: Try to understand the flow and provide a human readable summary for each rule. do NOT just dump the json result
+        
 """
-
-class AIProvider(str, Enum):
-    VERTEX_AI = "vertex_ai"
-    OPENAI = "openai"
-    AZURE_OPENAI = "azure_openai"
-    OPENAI_COMPATIBLE = "openai_compatible"
-
-class ModelConfig:
-    @staticmethod
-    def get_reasoning_model():
-        """Get the reasoning model based on configured provider"""
-        provider = os.getenv('AI_PROVIDER', 'vertex_ai').lower()
-        console.print(f"Using AI provider: {provider}")
-        
-        if provider == AIProvider.VERTEX_AI:
-            service_account = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('VERTEX_AI_SERVICE_ACCOUNT_FILE')
-            project_id = os.getenv('VERTEX_AI_PROJECT')
-            region = os.getenv('VERTEX_AI_LOCATION', 'us-central1')
-            
-            reasoning_model_name = os.getenv('VERTEX_AI_REASONING_MODEL', 'gemini-1.5-pro')
-            
-            vertex_provider = GoogleVertexProvider(
-                service_account_file=service_account,
-                project_id=project_id,
-                region=region
-            )
-            
-            return GeminiModel(
-                reasoning_model_name,
-                provider=vertex_provider
-            )
-        
-        elif provider == AIProvider.OPENAI_COMPATIBLE:
-            openai_compat_provider = OpenAIProvider(
-                base_url=os.getenv('OPENAI_COMPATIBLE_BASE_URL'),
-                api_key=os.getenv('OPENAI_COMPATIBLE_TOKEN')
-            )
-            
-            reasoning_model_name = os.getenv('OPENAI_COMPATIBLE_REASONING_MODEL')
-            
-            return OpenAIModel(
-                model_name=reasoning_model_name,
-                provider=openai_compat_provider
-            )
-            
-        elif provider == AIProvider.OPENAI:
-            # Create OpenAI provider
-            openai_provider = OpenAIProvider(
-                api_key=os.getenv('OPENAI_API_KEY')
-            )
-            
-            return OpenAIModel(
-                model_name=os.getenv('OPENAI_REASONING_MODEL', 'gpt-4'),
-                provider=openai_provider
-            )
-            
-        elif provider == AIProvider.AZURE_OPENAI:
-            # Create Azure OpenAI client
-            azure_client = AsyncAzureOpenAI(
-                azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-                api_version=os.getenv('AZURE_OPENAI_VERSION', '2024-07-01-preview'),
-                api_key=os.getenv('AZURE_OPENAI_KEY')
-            )
-            
-            # Create OpenAI provider with the Azure client
-            azure_provider = OpenAIProvider(openai_client=azure_client)
-            
-            return OpenAIModel(
-                model_name=os.getenv('AZURE_OPENAI_REASONING_DEPLOYMENT', 'gpt-4'),
-                provider=azure_provider
-            )
-        
-        # Default fallback to OpenAI if provider not recognized
-        return OpenAIModel(
-            model_name='gpt-4',
-            provider=OpenAIProvider(api_key=os.getenv('OPENAI_API_KEY'))
-        )
 
 def format_json(obj: Any) -> str:
     """Format an object as JSON for display."""
@@ -266,8 +223,8 @@ class OktaMCPAgent:
             # Create the MCP server connection using PydanticAI's MCPServerHTTP
             self.mcp_server = MCPServerHTTP(url=SERVER_URL)
             
-            # Load the LLM model
-            self.model = ModelConfig.get_reasoning_model()
+            # Load the LLM model using the centralized model_provider
+            self.model = get_model()
             
             # Create the agent with the MCP server
             self.agent = Agent(
@@ -346,7 +303,7 @@ async def interactive_agent():
     """Run an interactive session with the agent."""
     # Create the client
     client = OktaMCPAgent()
-    console.print("AI Provider Selected: ", ModelConfig.get_reasoning_model())
+    console.print("[bold]AI Provider Selected:[/]", os.getenv('AI_PROVIDER', 'openai'))
     
     try:
         # Connect to the MCP server
@@ -409,7 +366,6 @@ async def interactive_agent():
 
 if __name__ == "__main__":
     try:
-        
         asyncio.run(interactive_agent())
     except KeyboardInterrupt:
         console.print("\n[italic]Client terminated by user[/]")
