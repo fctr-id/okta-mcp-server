@@ -171,11 +171,11 @@ class ToolRegistry:
         except ImportError:
             logger.warning("Could not import apps_tools module")    
             
-        try:
-            from okta_mcp.tools import datetime_tools
-            self.register_tools_from_module(datetime_tools, server, client)
-        except ImportError:
-            logger.warning("Could not import datetime_tools module")                               
+        #try:
+        #    from okta_mcp.tools import datetime_tools
+        #    self.register_tools_from_module(datetime_tools, server, client)
+        #except ImportError:
+        #    logger.warning("Could not import datetime_tools module")                               
             
         try:
             from okta_mcp.tools import log_events_tools
@@ -193,7 +193,7 @@ class ToolRegistry:
         # from okta_mcp.tools import group_tools
         # from okta_mcp.tools import app_tools
         
-        logger.info(f"Registered tools: {len(self.tools)} tools in {len(self.categories)} categories")
+        #logger.info(f"Registered tools: {len(self.tools)} tools in {len(self.categories)} categories")
     
     def get_tool_info(self, tool_name: str) -> Optional[Dict[str, Any]]:
         """Get information about a specific tool."""
