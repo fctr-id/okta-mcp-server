@@ -411,7 +411,7 @@ async def interactive_client():
         
         while True:
             try:
-                query = Prompt.ask("\n[bold]Enter your query")
+                query = Prompt.ask("\n[bold yellow]Enter your query")
                 
                 # Handle special commands
                 query_lower = query.lower().strip()
