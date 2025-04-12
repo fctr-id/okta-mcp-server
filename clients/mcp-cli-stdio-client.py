@@ -24,25 +24,54 @@ from openai import AsyncAzureOpenAI
 # Add the parent directory to sys.path to enable imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from okta_mcp.utils.model_provider import get_model
-from okta_mcp.utils.mcp_logging_utils import (
+# Import from the consolidated logging module instead of mcp_logging_utils
+from okta_mcp.utils.logging import (
+    configure_logging,
     setup_protocol_logging, 
     get_client_logger,
     format_json_with_newlines,
     LoggingMCPServerStdio
 )
 
+# Block all okta_mcp initialization logs at the root level
+class OktaInitFilter(logging.Filter):
+    def filter(self, record):
+        # Block initialization and registration logs from okta_mcp
+        if record.name.startswith('okta_mcp') and (
+            'Initializing' in record.getMessage() or 
+            'Registered' in record.getMessage() or 
+            'Starting server' in record.getMessage() or 
+            'created' in record.getMessage()):
+            return False
+            
+        # Block MCP server request processing logs
+        if record.name == 'mcp.server.lowlevel.server' and 'Processing request' in record.getMessage():
+            return False
+            
+        return True
+
 # Load environment variables
 load_dotenv()
+
+# Configure root logging first - use the new consolidated approach
+# This will properly set up console output and suppress noisy MCP logs
+root_logger = configure_logging(
+    console_level=logging.INFO,
+    suppress_mcp_logs=True
+)
 
 # Configure console
 console = Console()
 
-# Setup loggers
-protocol_logger, fs_logger = setup_protocol_logging()
+
+# Setup specialized loggers - don't show fs_logger messages in console
+protocol_logger, fs_logger = setup_protocol_logging(show_fs_logs=False)
 client_logger = get_client_logger("mcp_stdio_client")
 
 # Determine if we're in debug mode
 DEBUG_MODE = os.getenv('DEBUG', 'false').lower() == 'true'
+
+# Rest of your code remains unchanged
 
 system_prompt = """
     ## Role & Expertise
@@ -204,16 +233,21 @@ class OktaMCPStdioClient:
             return False
     
     async def test_connection(self):
-        """Test the connection by making a simple request."""
+        """Test the connection without starting a server."""
         try:
             protocol_logger.info("Testing connection...")
             fs_logger.info("Testing connection...")
             
-            async with self.agent.run_mcp_servers():
-                # If we get here, the connection is working
-                protocol_logger.info("Connection test successful")
-                fs_logger.info("Connection test successful")
-                return True
+            # Just verify we have the needed credentials
+            if not os.getenv("OKTA_API_TOKEN") or not os.getenv("OKTA_CLIENT_ORGURL"):
+                protocol_logger.error("Missing Okta credentials")
+                fs_logger.error("Missing Okta credentials")
+                return False
+                
+            # Don't actually start a server for the test
+            protocol_logger.info("Connection settings verified")
+            fs_logger.info("Connection settings verified")
+            return True
         except Exception as e:
             protocol_logger.error(f"Connection test failed: {e}")
             fs_logger.error(f"Connection test failed: {e}")
@@ -224,73 +258,72 @@ class OktaMCPStdioClient:
         if not self.agent:
             raise ValueError("Agent not initialized")
         
-        with console.status(f"[bold green]Processing query: {query}"):
-            try:
-                # Log that we're about to process a query
-                protocol_logger.info(f"Processing query: {query}")
-                fs_logger.info(f"Processing query: {query}")
+        try:
+            # Log that we're about to process a query
+            protocol_logger.debug(f"Processing query: {query}")
+            fs_logger.info(f"Processing query: {query}")
+            
+            # Add direct console logging for visibility
+            console.print(f"[bold green]Processing query...[/]")
+            
+            # Run the query through the agent
+            async with self.agent.run_mcp_servers():
+                # Log MCP servers are running
+                protocol_logger.info("MCP servers started for query")
+                fs_logger.info("MCP servers started for query")
                 
-                # Add direct console logging for visibility
-                console.print(f"[dim]Starting query processing...[/]")
+                # Log the start of the agent run
+                protocol_logger.debug("Starting agent.run(query)")
+                fs_logger.info("Starting agent.run(query)")
                 
-                # Run the query through the agent
-                async with self.agent.run_mcp_servers():
-                    # Log MCP servers are running
-                    protocol_logger.info("MCP servers started for query")
-                    fs_logger.info("MCP servers started for query")
-                    
-                    # Log the start of the agent run
-                    protocol_logger.info("Starting agent.run(query)")
-                    fs_logger.info("Starting agent.run(query)")
-                    
-                    # Execute the query
-                    result = await self.agent.run(query)
-                    
-                    # Log the completion of the query
-                    protocol_logger.info("Agent.run completed successfully")
-                    fs_logger.info("Agent.run completed successfully")
-                    
-                    # Try to log all messages exchanged
-                    try:
-                        if hasattr(result, 'all_messages'):
-                            messages = result.all_messages()
-                            protocol_logger.info(f"Message exchange count: {len(messages)}")
-                            fs_logger.info(f"Message exchange count: {len(messages)}")
+                # Execute the query
+                result = await self.agent.run(query)
+                
+                # Log the completion of the query
+                protocol_logger.debug("Agent.run completed successfully")
+                fs_logger.info("Agent.run completed successfully")
+                
+                # Try to log all messages exchanged
+                try:
+                    if hasattr(result, 'all_messages'):
+                        messages = result.all_messages()
+                        protocol_logger.debug(f"Message exchange count: {len(messages)}")
+                        fs_logger.debug(f"Message exchange count: {len(messages)}")
+                        
+                        for i, msg in enumerate(messages):
+                            # Convert to string in case it's not serializable
+                            msg_str = str(msg)
+                            try:
+                                if isinstance(msg, dict):
+                                    msg_str = json.dumps(msg, default=str)
+                            except:
+                                pass
                             
-                            for i, msg in enumerate(messages):
-                                # Convert to string in case it's not serializable
-                                msg_str = str(msg)
-                                try:
-                                    if isinstance(msg, dict):
-                                        msg_str = json.dumps(msg, default=str)
-                                except:
-                                    pass
-                                
-                                protocol_logger.info(f"Message {i}: {msg_str}")
-                                fs_logger.info(f"Message {i}: {msg_str}")
-                    except Exception as e:
-                        protocol_logger.error(f"Error logging messages: {e}")
-                        fs_logger.error(f"Error logging messages: {e}")
-                    
-                    # Always print detailed output in debug mode
-                    if DEBUG_MODE:
-                        console.print("[cyan]===== Full message exchange =====[/]")
-                        console.print(result.all_messages())
-                    else:
-                        console.print("[green]Query processed successfully[/]")
-                    
-                    return result.data
-                    
-            except Exception as e:
-                protocol_logger.error(f"Error processing query: {e}")
-                fs_logger.error(f"Error processing query: {e}")
-                console.print(f"[bold red]Query processing error: {e}[/]")
-                return f"Error processing query: {str(e)}"
+                            protocol_logger.debug(f"Message {i}: {msg_str}")
+                            fs_logger.debug(f"Message {i}: {msg_str}")
+                except Exception as e:
+                    protocol_logger.error(f"Error logging messages: {e}")
+                    fs_logger.error(f"Error logging messages: {e}")
+                
+                # Always print detailed output in debug mode
+                if DEBUG_MODE:
+                    console.print("[cyan]===== Full message exchange =====[/]")
+                    console.print(result.all_messages())
+                else:
+                    console.print("[green]Query processed successfully[/]")
+                
+                return result.data
+                
+        except Exception as e:
+            protocol_logger.error(f"Error processing query: {e}")
+            fs_logger.error(f"Error processing query: {e}")
+            console.print(f"[bold red]Query processing error: {e}[/]")
+            return f"Error processing query: {str(e)}"
 
     async def inspect_tool_definitions(self):
         """Show what tool definitions the LLM actually sees."""
         try:
-            console.print("[yellow]Inspecting tool definitions...[/]")
+            console.print("[yellow]Starting server to inspect available tools...[/]")
             protocol_logger.info("Inspecting tool definitions")
             fs_logger.info("Inspecting tool definitions")
             
@@ -316,6 +349,47 @@ class OktaMCPStdioClient:
             fs_logger.error(f"Error inspecting tool definitions: {e}")
             console.print(f"[bold red]Error inspecting tools: {e}[/]")
             return f"Error: {str(e)}"
+        
+    async def _handle_notification(self, notification):
+        """Handle notifications from the MCP server."""
+        try:
+            method = notification.get('method', '')
+            params = notification.get('params', {})
+            
+            # Log the notification for debugging
+            protocol_logger.info(f"Received notification: {method}")
+            
+            # Handle logging notifications
+            if method == 'notifications/message' or method == 'notifications/logging':
+                # Process logging notification
+                if method == 'notifications/message':
+                    msg = params.get('data', {}).get('message', '') or str(params.get('data', ''))
+                    level = params.get('level', 'info').lower()
+                else:
+                    msg = params.get('message', '')
+                    level = params.get('level', 'info').lower()
+                
+                # Map level to color
+                color_map = {
+                    'debug': 'dim',
+                    'info': 'cyan',
+                    'warning': 'yellow',
+                    'warn': 'yellow',
+                    'error': 'red',
+                    'critical': 'bold red'
+                }
+                color = color_map.get(level, 'cyan')
+                
+                # Display in console with appropriate color
+                console.print(f"[{color}]► {msg}[/]")
+                
+            # Handle progress notifications
+            elif method == 'notifications/progress':
+                # Optional: Add progress bar handling here
+                pass
+                
+        except Exception as e:
+            protocol_logger.error(f"Error handling notification: {e}")        
 
 async def interactive_client():
     """Run an interactive session with the STDIO client."""
@@ -325,7 +399,7 @@ async def interactive_client():
         if not await client.connect():
             return
         
-        # Test the connection to make sure it's working
+        # Test the connection to make sure credentials exist
         if not await client.test_connection():
             console.print("[bold yellow]Warning: Connection test failed. Functionality may be limited.[/]")
         
