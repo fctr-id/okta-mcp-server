@@ -28,6 +28,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         """List Okta groups with various filtering options. The search parameter supports the following operators and these can be applied id, type, lastUpdated, lastMembershipUpdated, create and profile.attributes:
           The search can be combined with multiple criteria , for example: search=type eq "APP_GROUP" and (created lt "2014-01-01T00:00:00.000Z" and source.id eq "0oa2v0el0gP90aqjJ0g7"). Dates are in ISO 8601 format
           eq (equals), ne (not equals), co (contains), sw (starts with), ew (ends with), pr (present - has value or null), gt (greater than), (less than), ge (greater than or equal to date), lt(less than data) 
+          Do NOT use 'eq' for dates, use 'lt' or 'gt' instead and be generous with times
         
         Args:
             search: Okta expression to filter groups using Okta Expression Language.
