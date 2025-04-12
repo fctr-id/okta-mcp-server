@@ -78,7 +78,6 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             all_groups = []
             page_count = 0
             
-            # Process results with EXACT pagination pattern from fetc_grp_pagination.py
             while True:
                 # Process current page
                 if groups:
@@ -88,7 +87,6 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                     if ctx:
                         await ctx.info(f"Page {page_count}: Retrieved {len(groups)} groups (total: {len(all_groups)})")
                 
-                # Check if there are more pages - EXACT same check from fetc_grp_pagination.py
                 if resp and resp.has_next():
                     if ctx:
                         await ctx.info("Getting next page...")
@@ -222,38 +220,37 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             all_users = []
             page_count = 0
             
-            # Process first page
-            if users:
-                all_users.extend(users)
-                page_count += 1
-                if ctx:
-                    await ctx.info(f"Retrieved {len(users)} members")
-            
-            # Process additional pages if available
-            while resp and hasattr(resp, 'has_next') and resp.has_next():
-                if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
-                
-                raw_response = await okta_client.client.list_group_users_next(resp)
-                users, resp, err = normalize_okta_response(raw_response)
-                
-                if err:
-                    if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
-                    break
-                
+            while True:
+                # Process current page
                 if users:
                     all_users.extend(users)
                     page_count += 1
+                    
                     if ctx:
-                        await ctx.info(f"Retrieved {len(users)} additional members")
+                        await ctx.info(f"Page {page_count}: Retrieved {len(users)} members (total: {len(all_users)})")
+                
+                if resp and resp.has_next():
+                    if ctx:
+                        await ctx.info("Getting next page...")
+                    
+                    # Get next page with small delay to prevent rate limiting
+                    await asyncio.sleep(0.2)
+                    users, err = await resp.next()
+                    
+                    if err:
+                        if ctx:
+                            await ctx.error(f"Error getting next page: {err}")
+                        break
+                else:
+                    if ctx:
+                        await ctx.info("No more pages available.")
+                    break
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_users)} total members across {page_count} pages")
+                await ctx.info(f"Pagination complete. Retrieved {len(all_users)} total members in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
-            # Format response with enhanced pagination info
+            # Format response with pagination info
             result = {
                 "members": [user.as_dict() for user in all_users],
                 "group_id": group_id,
@@ -261,9 +258,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                     "limit": limit,
                     "page_count": page_count,
                     "total_results": len(all_users),
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "has_more": False  # We've already processed all pages
                 }
             }
             
@@ -329,38 +324,37 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             all_apps = []
             page_count = 0
             
-            # Process first page
-            if apps:
-                all_apps.extend(apps)
-                page_count += 1
-                if ctx:
-                    await ctx.info(f"Retrieved {len(apps)} applications")
-            
-            # Process additional pages if available
-            while resp and hasattr(resp, 'has_next') and resp.has_next():
-                if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count, page_count + 5)  # Estimate
-                
-                raw_response = await okta_client.client.list_assigned_applications_for_group_next(resp)
-                apps, resp, err = normalize_okta_response(raw_response)
-                
-                if err:
-                    if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
-                    break
-                
+            while True:
+                # Process current page
                 if apps:
                     all_apps.extend(apps)
                     page_count += 1
+                    
                     if ctx:
-                        await ctx.info(f"Retrieved {len(apps)} additional applications")
+                        await ctx.info(f"Page {page_count}: Retrieved {len(apps)} applications (total: {len(all_apps)})")
+                
+                if resp and resp.has_next():
+                    if ctx:
+                        await ctx.info("Getting next page...")
+                    
+                    # Get next page with small delay to prevent rate limiting
+                    await asyncio.sleep(0.2)
+                    apps, err = await resp.next()
+                    
+                    if err:
+                        if ctx:
+                            await ctx.error(f"Error getting next page: {err}")
+                        break
+                else:
+                    if ctx:
+                        await ctx.info("No more pages available.")
+                    break
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_apps)} total applications across {page_count} pages")
+                await ctx.info(f"Pagination complete. Retrieved {len(all_apps)} total applications in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
-            # Format response with enhanced pagination info
+            # Format response with pagination info
             result = {
                 "applications": [app.as_dict() for app in all_apps],
                 "group_id": group_id,
@@ -368,9 +362,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                     "limit": limit,
                     "page_count": page_count,
                     "total_results": len(all_apps),
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "has_more": False  # We've already processed all pages
                 }
             }
             
