@@ -13,7 +13,7 @@ def register_datetime_tools(server: FastMCP, okta_client):
     """Register datetime utility tools with the MCP server."""
     
     @server.tool()
-    def get_current_time(buffer_hours: int = 0, ctx: Context = None) -> str:
+    async def get_current_time(buffer_hours: int = 0, ctx: Context = None) -> str:
         """
         Returns the current date and time in UTC as a string.
                 Example:
@@ -31,7 +31,7 @@ def register_datetime_tools(server: FastMCP, okta_client):
         """
         try:
             if ctx:
-                ctx.info(f"Getting current time with buffer of {buffer_hours} hours")
+                await ctx.info(f"Getting current time with buffer of {buffer_hours} hours")
             
             # Get current UTC time
             now = datetime.now(timezone.utc)
@@ -40,24 +40,24 @@ def register_datetime_tools(server: FastMCP, okta_client):
             if buffer_hours:
                 now += timedelta(hours=buffer_hours)
                 if ctx:
-                    ctx.info(f"Added buffer of {buffer_hours} hours to current time")
+                    await ctx.info(f"Added buffer of {buffer_hours} hours to current time")
                 
             # Format with 'Z' to explicitly indicate UTC
             result = now.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             
             if ctx:
-                ctx.info(f"Current time (with buffer): {result}")
+                await ctx.info(f"Current time (with buffer): {result}")
             
             return result
             
         except Exception as e:
             logger.exception("Error in get_current_time tool")
             if ctx:
-                ctx.error(f"Error in get_current_time tool: {str(e)}")
+                await ctx.error(f"Error in get_current_time tool: {str(e)}")
             return None
     
     @server.tool()
-    def parse_relative_time(time_expression: str, ctx: Context = None) -> str:
+    async def parse_relative_time(time_expression: str, ctx: Context = None) -> str:
         """
         Parses a relative time expression and returns the corresponding UTC timestamp.
                 Examples:
@@ -77,26 +77,26 @@ def register_datetime_tools(server: FastMCP, okta_client):
         """
         try:
             if ctx:
-                ctx.info(f"Parsing relative time expression: '{time_expression}'")
+                await ctx.info(f"Parsing relative time expression: '{time_expression}'")
             
             parsed_time = dateparser.parse(time_expression, settings={'RETURN_AS_TIMEZONE_AWARE': True})
             if parsed_time is None:
                 logger.warning(f"Could not parse time expression: {time_expression}")
                 if ctx:
-                    ctx.error(f"Could not parse time expression: '{time_expression}'")
+                    await ctx.error(f"Could not parse time expression: '{time_expression}'")
                 return None
             
             result = parsed_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             
             if ctx:
-                ctx.info(f"Successfully parsed '{time_expression}' to: {result}")
+                await ctx.info(f"Successfully parsed '{time_expression}' to: {result}")
             
             return result
             
         except Exception as e:
             logger.exception(f"Error parsing time expression '{time_expression}'")
             if ctx:
-                ctx.error(f"Error parsing time expression '{time_expression}': {str(e)}")
+                await ctx.error(f"Error parsing time expression '{time_expression}': {str(e)}")
             return None
     
     #logger.info("Registered datetime utility tools")
