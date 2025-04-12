@@ -355,4 +355,4 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 await ctx.error(f"Error in list_network_zones tool: {str(e)}")
             return handle_okta_result(e, "list_network_zones")        
     
-    logger.info("Registered policy management tools")
+    #logger.info("Registered policy management tools")

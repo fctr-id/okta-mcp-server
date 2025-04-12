@@ -445,4 +445,4 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 await ctx.error(f"Error in list_user_factors tool: {str(e)}")
             return handle_okta_result(e, "list_user_factors")                 
     
-    logger.info("Registered user management tools")
+    #logger.info("Registered user management tools")

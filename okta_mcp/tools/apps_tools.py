@@ -371,4 +371,4 @@ def register_application_tools(server: FastMCP, okta_client: OktaMcpClient):
             return handle_okta_result(e, "list_application_group_assignments")        
 
     
-    logger.info("Registered application management tools")
+    #logger.info("Registered application management tools")

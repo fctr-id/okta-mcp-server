@@ -189,7 +189,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
                 await ctx.error(f"Error in get_logs tool: {str(e)}")
             return handle_okta_result(e, "get_logs")        
         
-    logger.info("Registered log event management tools")
+    #logger.info("Registered log event management tools")
     
 #@server.tool()
 async def analyze_event_codes(

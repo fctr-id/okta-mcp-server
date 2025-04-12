@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.types import TextContent
-
+import asyncio
 from okta_mcp.utils.okta_client import OktaMcpClient
 from okta_mcp.utils.error_handling import handle_okta_result
 from okta_mcp.utils.normalize_okta_responses import normalize_okta_response, paginate_okta_response
@@ -20,57 +20,40 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     
     @server.tool()
     async def list_okta_groups(
-        query: str = None,
-        filter_type: str = None,
-        name: str = None,
-        type: str = None,
+        search: str = None,
         after: str = None,
+        limit: int = 200,
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta groups with various filtering options.
+        """List Okta groups with various filtering options. The search parameter supports the following operators and these can be applied id, type, lastUpdated, lastMembershipUpdated, create and profile.attributes:
+          The search can be combined with multiple criteria , for example: search=type eq "APP_GROUP" and (created lt "2014-01-01T00:00:00.000Z" and source.id eq "0oa2v0el0gP90aqjJ0g7"). Dates are in ISO 8601 format
+          eq (equals), ne (not equals), co (contains), sw (starts with), ew (ends with), pr (present - has value or null), gt (greater than), (less than), ge (greater than or equal to date), lt(less than data) 
         
         Args:
-            query: Simple text search on name (e.g., 'Engineering')
-            filter_type: Group filter (e.g., 'type eq "OKTA_GROUP"')
-            name: Filter by exact group name
-            type: Filter by group type (OKTA_GROUP, APP_GROUP, etc.)
-            after: Pagination cursor
+            search: Okta expression to filter groups using Okta Expression Language.
+            after: Pagination cursor for retrieving additional pages
+            limit: Maximum number of results per page (1-200)
             ctx: MCP Context for progress reporting and logging
-            
+                
         Returns:
             Dictionary containing groups and pagination information
         """
         try:
-            limit = 200
+            # Validate parameters
+            limit = min(max(1, limit), 200)
             
             if ctx:
-                await ctx.info(f"Listing groups with parameters: query={query}, filter={filter_type}, name={name}, type={type}")
+                await ctx.info(f"Listing groups with parameters: search={search}, limit={limit}")
             
-            # Validate parameters
-            if limit < 1 or limit > 200:
-                raise ValueError("Limit must be between 1 and 200")
-                
             # Prepare request parameters
             params = {
                 'limit': limit
             }
             
-            if query:
-                params['q'] = query
+            # Add search parameter if provided
+            if search:
+                params['search'] = search
                 
-            if filter_type:
-                params['filter'] = filter_type
-                
-            if name:
-                # Add name filter if not using general query
-                if 'q' not in params:
-                    params['q'] = name
-                    
-            if type:
-                # Add type filter if not already specified
-                if 'filter' not in params:
-                    params['filter'] = f'type eq "{type}"'
-                    
             if after:
                 params['after'] = after
             
@@ -94,47 +77,46 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             all_groups = []
             page_count = 0
             
-            # Process first page
-            if groups:
-                all_groups.extend(groups)
-                page_count += 1
-                if ctx:
-                    await ctx.info(f"Retrieved {len(groups)} groups")
-            
-            # Process additional pages if available
-            while resp and hasattr(resp, 'has_next') and resp.has_next():
-                if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
-                
-                raw_response = await okta_client.client.list_groups_next(resp)
-                groups, resp, err = normalize_okta_response(raw_response)
-                
-                if err:
-                    if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
-                    break
-                
+            # Process results with EXACT pagination pattern from fetc_grp_pagination.py
+            while True:
+                # Process current page
                 if groups:
                     all_groups.extend(groups)
                     page_count += 1
+                    
                     if ctx:
-                        await ctx.info(f"Retrieved {len(groups)} additional groups")
+                        await ctx.info(f"Page {page_count}: Retrieved {len(groups)} groups (total: {len(all_groups)})")
+                
+                # Check if there are more pages - EXACT same check from fetc_grp_pagination.py
+                if resp and resp.has_next():
+                    if ctx:
+                        await ctx.info("Getting next page...")
+                    
+                    # Get next page with small delay to prevent rate limiting
+                    await asyncio.sleep(0.2)
+                    groups, err = await resp.next()
+                    
+                    if err:
+                        if ctx:
+                            await ctx.error(f"Error getting next page: {err}")
+                        break
+                else:
+                    if ctx:
+                        await ctx.info("No more pages available.")
+                    break
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
+                await ctx.info(f"Pagination complete. Retrieved {len(all_groups)} total groups in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
-            # Format response with enhanced pagination info
+            # Format response with pagination info
             result = {
                 "groups": [group.as_dict() for group in all_groups],
                 "pagination": {
                     "limit": limit,
                     "page_count": page_count,
                     "total_results": len(all_groups),
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "has_more": False  # We've already processed all pages
                 }
             }
             
@@ -399,4 +381,4 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 await ctx.error(f"Error in list_assigned_applications tool: {str(e)}")
             return handle_okta_result(e, "list_assigned_applications")
     
-    logger.info("Registered group management tools")
+    #logger.info("Registered group management tools")

@@ -99,4 +99,4 @@ def register_datetime_tools(server: FastMCP, okta_client):
                 ctx.error(f"Error parsing time expression '{time_expression}': {str(e)}")
             return None
     
-    logger.info("Registered datetime utility tools")
+    #logger.info("Registered datetime utility tools")
