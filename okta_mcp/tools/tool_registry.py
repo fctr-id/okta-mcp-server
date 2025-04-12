@@ -171,11 +171,11 @@ class ToolRegistry:
         except ImportError:
             logger.warning("Could not import apps_tools module")    
             
-        #try:
-        #    from okta_mcp.tools import datetime_tools
-        #    self.register_tools_from_module(datetime_tools, server, client)
-        #except ImportError:
-        #    logger.warning("Could not import datetime_tools module")                               
+        try:
+            from okta_mcp.tools import datetime_tools
+            self.register_tools_from_module(datetime_tools, server, client)
+        except ImportError:
+            logger.warning("Could not import datetime_tools module")                               
             
         try:
             from okta_mcp.tools import log_events_tools
