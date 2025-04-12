@@ -8,6 +8,14 @@ import logging
 import argparse
 from dotenv import load_dotenv
 
+# Add this right after imports
+try:
+    import mcp.server.lowlevel.server as mcp_server
+    mcp_server.VERBOSE_LOGGING = False  # This will disable the processing request logs
+    logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
+except ImportError:
+    print("Could not import mcp server module to disable verbose logging")
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
