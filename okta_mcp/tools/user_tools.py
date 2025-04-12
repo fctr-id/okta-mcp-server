@@ -235,7 +235,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                 # Extract the actual user ID
                 user_id = user.id
                 
-            # Execute Okta API request to get user's groups
+            # Execute Okta API request to get user's groups - single call, no pagination
             if ctx:
                 await ctx.info(f"Fetching groups for user ID: {user_id}")
                 
@@ -248,50 +248,14 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                     await ctx.error(f"Error listing groups for user {user_id}: {err}")
                 return handle_okta_result(err, "list_user_groups")
             
-            # Apply pagination based on environment variable
             if ctx:
-                await ctx.info("Retrieving paginated results...")
-            
-            all_groups = []
-            page_count = 0
-            
-            # Process first page
-            if groups:
-                all_groups.extend(groups)
-                page_count += 1
-            
-            # Process additional pages if available
-            while resp and hasattr(resp, 'has_next') and resp.has_next():
-                if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
-                
-                raw_response = await okta_client.client.list_user_groups_next(resp)
-                groups, resp, err = normalize_okta_response(raw_response)
-                
-                if err:
-                    if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
-                    break
-                
-                if groups:
-                    all_groups.extend(groups)
-                    page_count += 1
-            
-            if ctx:
-                await ctx.info(f"Retrieved {len(all_groups)} groups across {page_count} pages")
+                await ctx.info(f"Retrieved {len(groups) if groups else 0} groups")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
-            # Format response with enhanced pagination information
+            # Format response without pagination info since there's no pagination
             result = {
-                "groups": [group.as_dict() for group in all_groups],
-                "pagination": {
-                    "page_count": page_count,
-                    "total_results": len(all_groups),
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
-                }
+                "groups": [group.as_dict() for group in groups] if groups else [],
+                "total_groups": len(groups) if groups else 0
             }
             
             return result
@@ -300,7 +264,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             logger.exception(f"Error in list_user_groups tool for user_id {user_id}")
             if ctx:
                 await ctx.error(f"Error in list_user_groups tool: {str(e)}")
-            return handle_okta_result(e, "list_user_groups")       
+            return handle_okta_result(e, "list_user_groups")      
         
     @server.tool()
     async def list_okta_user_applications(
