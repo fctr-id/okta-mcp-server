@@ -30,6 +30,7 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
   - [📊 Context Window Limitations](#-context-window-limitations)
   - [🚨 SSE Transport Security Warning](#-sse-transport-security-warning)
 - [🛠️ Available Tools](#️-available-tools)
+- [�️ Available Tools](#️-available-tools-1)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
 - [🧠 Supported AI Providers](#-supported-ai-providers)
@@ -112,30 +113,39 @@ The SSE over HTTP transport mode has significant security risks:
 
 The Okta MCP Server currently provides the following tools:
 
+## 🛠️ Available Tools
+
+The Okta MCP Server currently provides the following tools:
+
 **User Management**
-- `list_users` - Retrieve a paginated list of users with filtering options
-- `get_user` - Get detailed information about a specific user by ID or login
-- `list_user_groups` - List all groups that a specific user belongs to
-- `list_user_applications` - List all application links (assigned applications) for a specific user
-- `list_user_factors` - List all authentication factors enrolled for a specific user
+- `list_okta_users` - Retrieve users with filtering, search, and pagination options
+- `get_okta_user` - Get detailed information about a specific user by ID or login
+- `list_okta_user_groups` - List all groups that a specific user belongs to
+- `list_okta_user_applications` - List all application links (assigned applications) for a specific user
+- `list_okta_user_factors` - List all authentication factors enrolled for a specific user
 
 **Group Operations**
-- `list_groups` - Retrieve groups in your Okta organization with filtering options
-- `get_group` - Get detailed information about a specific group
-- `list_group_members` - List all members of a specific group
-- `list_assigned_applications_for_group` - List all applications assigned to a specific group
+- `list_okta_groups` - Retrieve groups with filtering, search, and pagination options
+- `get_okta_group` - Get detailed information about a specific group
+- `list_okta_group_members` - List all members of a specific group
+- `list_okta_assigned_applications_for_group` - List all applications assigned to a specific group
 
 **Application Management**
-- `list_applications` - Retrieve applications with filtering, search, and pagination options. Can retrieve all nested properties (credentials, settings, policies, keys, URLs ..etc) 
-- `list_application_users` - List all users assigned to a specific application
-- `list_application_group_assignments` - List all groups assigned to a specific application
+- `list_okta_applications` - Retrieve applications with filtering, search, and pagination options
+- `list_okta_application_users` - List all users assigned to a specific application
+- `list_okta_application_group_assignments` - List all groups assigned to a specific application
 
 **Policy & Network Management**
-- `list_policy_rules` - List all rules for a specific policy with detailed conditions and actions
-- `list_network_zones` - List all network zones with IP ranges and configuration details
+- `list_okta_policy_rules` - List all rules for a specific policy with detailed conditions and actions
+- `get_okta_policy_rule` - Get detailed information about a specific policy rule
+- `list_okta_network_zones` - List all network zones with IP ranges and configuration details
 
 **System Log Events**
-- `get_logs` - Retrieve Okta system log events with time-based, filter, and search options
+- `get_okta_event_logs` - Retrieve Okta system log events with time-based filtering and search options
+
+**Date & Time Utilities**
+- `get_current_time` - Get current UTC time in ISO 8601 format
+- `parse_relative_time` - Convert natural language time expressions to ISO 8601 format
 
 
 > Additional tools for applications, factors, policies, and more advanced operations are on the roadmap and will be added in future releases.
