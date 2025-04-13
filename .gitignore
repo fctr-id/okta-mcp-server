@@ -13,3 +13,4 @@ clients/mcl-cli-stdio-hybrid-client.py
 okta_mcp/utils/mcp_transport.py
 okta_mcp/tools/fetc_grp_pagination.py
 okta_mcp/tools/create_grps.py
+clients/event-stream-monitor.py
