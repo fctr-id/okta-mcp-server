@@ -113,10 +113,6 @@ The SSE over HTTP transport mode has significant security risks:
 
 The Okta MCP Server currently provides the following tools:
 
-## 🛠️ Available Tools
-
-The Okta MCP Server currently provides the following tools:
-
 **User Management**
 - `list_okta_users` - Retrieve users with filtering, search, and pagination options
 - `get_okta_user` - Get detailed information about a specific user by ID or login
