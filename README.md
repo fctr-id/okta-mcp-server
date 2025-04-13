@@ -30,7 +30,6 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
   - [📊 Context Window Limitations](#-context-window-limitations)
   - [🚨 SSE Transport Security Warning](#-sse-transport-security-warning)
 - [🛠️ Available Tools](#️-available-tools)
-- [�️ Available Tools](#️-available-tools-1)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
 - [🧠 Supported AI Providers](#-supported-ai-providers)
