@@ -33,7 +33,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             Uses flexible SCIM filter syntax.
             Supports operators: eq, ne, gt, lt, ge, le, sw (starts with), co (contains), pr (present), and, or.
             Filters on most user properties, including custom attributes, id, status, dates, arrays.
-            Supports sorting (sortBy, sortOrder).
+            Supports sorting (sortBy, sortOrder) - NOTE: Sorting parameters ONLY work with 'search' parameter, not with 'query'.
             Examples:
             {'search': 'profile.department eq "Engineering" and status eq "ACTIVE"'}
             {'search': 'profile.firstName sw "A"'}
@@ -47,8 +47,8 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             query: Simple text search only - use plain names like "Dan" (NOT "firstname:Dan")
             search: SCIM filtering (recommended) - use exact syntax like 'profile.firstName eq "Dan"'
             filter_type: Filter type (status, type, etc.)
-            sort_by: Field to sort by
-            sort_order: Sort direction (asc or desc)
+            sort_by: Field to sort by (only works with 'search' parameter)
+            sort_order: Sort direction (asc or desc) (only works with 'search' parameter)
             ctx: MCP Context for progress reporting and logging
             
         Returns:
@@ -69,14 +69,15 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             # Prepare request parameters
             params = {
-                'limit': limit,
-                'sortBy': sort_by,
-                'sortOrder': sort_order
+                'limit': limit
             }
             
             # Priority: search > query > filter
             if search:
                 params['search'] = search
+                # Sort parameters only work with search queries
+                params['sortBy'] = sort_by
+                params['sortOrder'] = sort_order
             elif query:
                 params['q'] = query
                 
