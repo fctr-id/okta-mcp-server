@@ -114,7 +114,7 @@ def configure_logging(log_level=None, console_level=None, suppress_mcp_logs=True
     return root_logger
 
 def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesystem", 
-                           show_fs_logs=False):
+                           show_fs_logs=False, log_level=None):
     """
     Set up protocol-level logging to capture all MCP messages.
     
@@ -122,9 +122,15 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
         logger_name: The name for the protocol logger
         fs_logger_name: The name for the filesystem logger
         show_fs_logs: Whether to show filesystem logs in console
+        log_level: The logging level to use (defaults to LOG_LEVEL env var or INFO)
     """
     log_dir = get_log_directory()
     log_file = os.path.join(log_dir, "mcp_protocol.log")
+    
+    # Determine log level from environment if not specified
+    if log_level is None:
+        log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
+        log_level = getattr(logging, log_level_str, logging.INFO)
     
     # Create ISO8601 formatter
     formatter = ISO8601Formatter('%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -136,16 +142,16 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
         backupCount=5
     )
     file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(log_level)  # Use provided log level
     
     # Create console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel("INFO")  # Use provided log level
     
     # Set up the main protocol logger
     protocol_logger = logging.getLogger(logger_name)
-    protocol_logger.setLevel(logging.INFO)
+    protocol_logger.setLevel(log_level)  # Use provided log level
     
     # Remove existing handlers to avoid duplicates
     for handler in protocol_logger.handlers[:]:
@@ -158,7 +164,7 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
     
     # Set up filesystem logger
     fs_logger = logging.getLogger(fs_logger_name)
-    fs_logger.setLevel(logging.INFO)
+    fs_logger.setLevel(log_level)  # Use provided log level
     
     for handler in fs_logger.handlers[:]:
         fs_logger.removeHandler(handler)
@@ -182,7 +188,6 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
     logging.getLogger("okta_mcp.utils").setLevel(logging.WARNING)
     logging.getLogger("okta_mcp.tools").setLevel(logging.WARNING)
     logging.getLogger("okta_mcp.tools.tool_registry").setLevel(logging.WARNING)
-    
     
     return protocol_logger, fs_logger
 
