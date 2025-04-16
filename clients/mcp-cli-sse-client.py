@@ -268,7 +268,7 @@ class OktaMCPAgent:
                         # In non-debug mode, just print a simple confirmation
                         console.print("[green]Query processed successfully[/]")
                 
-                return result.data
+                return result.output
             except Exception as e:
                 logger.error(f"Error processing query: {e}")
                 return f"Error processing query: {str(e)}"

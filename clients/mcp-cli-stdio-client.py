@@ -14,12 +14,8 @@ from rich.prompt import Prompt
 from rich.syntax import Syntax
 from dotenv import load_dotenv
 from pydantic_ai import Agent
-from pydantic_ai.models.gemini import GeminiModel
-from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.providers.google_vertex import GoogleVertexProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.mcp import MCPServerStdio
-from openai import AsyncAzureOpenAI
+
 
 # Add the parent directory to sys.path to enable imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -55,8 +51,12 @@ load_dotenv()
 
 # Configure root logging first - use the new consolidated approach
 # This will properly set up console output and suppress noisy MCP logs
+log_level_name = os.getenv('LOG_LEVEL', 'INFO').upper()
+log_level = getattr(logging, log_level_name, logging.INFO)
+
 root_logger = configure_logging(
     console_level=logging.INFO,
+    log_level=log_level,
     suppress_mcp_logs=True
 )
 
@@ -65,7 +65,7 @@ console = Console()
 
 
 # Setup specialized loggers - don't show fs_logger messages in console
-protocol_logger, fs_logger = setup_protocol_logging(show_fs_logs=False)
+protocol_logger, fs_logger = setup_protocol_logging(show_fs_logs=False, log_level=log_level)
 client_logger = get_client_logger("mcp_stdio_client")
 
 # Determine if we're in debug mode
@@ -312,7 +312,7 @@ class OktaMCPStdioClient:
                 else:
                     console.print("[green]Query processed successfully[/]")
                 
-                return result.data
+                return result.output
                 
         except Exception as e:
             protocol_logger.error(f"Error processing query: {e}")
