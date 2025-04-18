@@ -1,5 +1,5 @@
 pydantic
-pydantic-ai==0.1.0
+pydantic-ai==0.1.2
 okta
 python-dotenv
 mcp

@@ -279,8 +279,8 @@ async def analyze_event_codes(
         result = await agent.run(prompt)
         
         # Extract the data from the result
-        if hasattr(result, 'data') and isinstance(result.data, dict):
-            response_data = result.data
+        if hasattr(result, 'data') and isinstance(result.output, dict):
+            response_data = result.output
         else:
             # Fallback if structuring failed
             response_data = {

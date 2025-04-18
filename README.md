@@ -157,6 +157,7 @@ The Okta MCP Server currently provides the following tools:
 > Not all AI models work with this MCP server. Testing has only been performed with:
 > - GPT-4.0
 > - Claude 3.7 Sonnet
+> - Google-2.5-pro
 >
 > You must use latest model versions that explicitly support tool calling/function calling capabilities. Older models or models without tool calling support will not be able to interact with the Okta MCP Server.
 
@@ -188,6 +189,8 @@ source venv/bin/activate  # On Windows use: venv\Scripts\activate
 # Install dependencies
 pip install -r requirements.txt
 ```
+
+> **⚠️ NOTICE:** If you clone this repository anew or pull updates, always make sure to re-run `pip install -r requirements.txt` to ensure all dependencies are up-to-date.
 
 ### Configuration & Usage
 
