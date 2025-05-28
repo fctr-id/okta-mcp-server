@@ -320,7 +320,7 @@ class LoggingMCPServerStdio:
     Enhanced MCP Server with proper notification handling and real-time display.
     
     This class extends the standard MCP server to properly:
-    1. Display context logging messages (ctx.info(), ctx.error(), etc.)
+    1. Display context logging messages (logger.info(), logger.error(), etc.)
     2. Show progress notifications
     3. Show tool execution information
     4. Log all server activity
