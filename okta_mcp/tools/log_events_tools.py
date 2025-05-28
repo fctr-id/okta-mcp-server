@@ -78,7 +78,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = 500
             
             if ctx:
-                await ctx.info(f"Getting logs with parameters: since={since}, until={until}, filter={filter_string}, q={q}")
+                logger.info(f"Getting logs with parameters: since={since}, until={until}, filter={filter_string}, q={q}")
             
             # Validate parameters
             if limit < 1 or limit > 1000:
@@ -111,7 +111,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                await ctx.info(f"Executing Okta API request with params: {params}")
+                logger.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.get_logs(params)
@@ -120,12 +120,12 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error retrieving log events: {err}")
                 if ctx:
-                    await ctx.error(f"Error retrieving log events: {err}")
+                    logger.error(f"Error retrieving log events: {err}")
                 return handle_okta_result(err, "get_logs")
             
             # Apply pagination based on environment variable
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_log_events = []
             page_count = 0
@@ -138,7 +138,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
+                    logger.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 try:
@@ -148,7 +148,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
                     if next_err:
                         logger.error(f"Error during pagination: {next_err}")
                         if ctx:
-                            await ctx.error(f"Error during pagination: {next_err}")
+                            logger.error(f"Error during pagination: {next_err}")
                         break
                         
                     # Process valid log events
@@ -161,11 +161,11 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
                 except Exception as e:
                     logger.error(f"Exception during pagination: {str(e)}")
                     if ctx:
-                        await ctx.error(f"Exception during pagination: {str(e)}")
+                        logger.error(f"Exception during pagination: {str(e)}")
                     break
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_log_events)} log events across {page_count} pages")
+                logger.info(f"Retrieved {len(all_log_events)} log events across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -186,7 +186,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception("Error in get_logs tool")
             if ctx:
-                await ctx.error(f"Error in get_logs tool: {str(e)}")
+                logger.error(f"Error in get_logs tool: {str(e)}")
             return handle_okta_result(e, "get_logs")        
         
     #logger.info("Registered log event management tools")
@@ -209,7 +209,7 @@ async def analyze_event_codes(
     """
     try:
         if ctx:
-            await ctx.info(f"Analyzing event codes for: {description}")
+            logger.info(f"Analyzing event codes for: {description}")
             await ctx.report_progress(10, 100)
         
         # Load event codes from CSV
@@ -223,7 +223,7 @@ async def analyze_event_codes(
             }
         
         if ctx:
-            await ctx.info(f"Loaded {len(event_codes)} event codes")
+            logger.info(f"Loaded {len(event_codes)} event codes")
             await ctx.report_progress(30, 100)
         
         # Create the model instance using the same approach as in mcp-cli-stdio-client.py
@@ -255,7 +255,7 @@ async def analyze_event_codes(
         )
         
         if ctx:
-            await ctx.info("Creating agent to analyze event codes")
+            logger.info("Creating agent to analyze event codes")
             await ctx.report_progress(50, 100)
         
         # Format the event codes as a simple list for the AI
@@ -273,7 +273,7 @@ async def analyze_event_codes(
         
         # Run the analysis
         if ctx:
-            await ctx.info("Running AI analysis of event codes")
+            logger.info("Running AI analysis of event codes")
             await ctx.report_progress(70, 100)
         
         result = await agent.run(prompt)
@@ -299,7 +299,7 @@ async def analyze_event_codes(
             filter_string = ""
         
         if ctx:
-            await ctx.info("Analysis complete")
+            logger.info("Analysis complete")
             await ctx.report_progress(100, 100)
         
         return {
@@ -311,7 +311,7 @@ async def analyze_event_codes(
     except Exception as e:
         logger.exception("Error in analyze_event_codes tool")
         if ctx:
-            await ctx.error(f"Error in analyze_event_codes tool: {str(e)}")
+            logger.error(f"Error in analyze_event_codes tool: {str(e)}")
         return {
             "error": str(e),
             "filter_string": None,

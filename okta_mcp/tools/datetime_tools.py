@@ -31,7 +31,7 @@ def register_datetime_tools(server: FastMCP, okta_client):
         """
         try:
             if ctx:
-                await ctx.info(f"Getting current time with buffer of {buffer_hours} hours")
+                logger.info(f"Getting current time with buffer of {buffer_hours} hours")
             
             # Get current UTC time
             now = datetime.now(timezone.utc)
@@ -40,20 +40,20 @@ def register_datetime_tools(server: FastMCP, okta_client):
             if buffer_hours:
                 now += timedelta(hours=buffer_hours)
                 if ctx:
-                    await ctx.info(f"Added buffer of {buffer_hours} hours to current time")
+                    logger.info(f"Added buffer of {buffer_hours} hours to current time")
                 
             # Format with 'Z' to explicitly indicate UTC
             result = now.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             
             if ctx:
-                await ctx.info(f"Current time (with buffer): {result}")
+                logger.info(f"Current time (with buffer): {result}")
             
             return result
             
         except Exception as e:
             logger.exception("Error in get_current_time tool")
             if ctx:
-                await ctx.error(f"Error in get_current_time tool: {str(e)}")
+                logger.error(f"Error in get_current_time tool: {str(e)}")
             return None
     
     @server.tool()
@@ -77,26 +77,26 @@ def register_datetime_tools(server: FastMCP, okta_client):
         """
         try:
             if ctx:
-                await ctx.info(f"Parsing relative time expression: '{time_expression}'")
+                logger.info(f"Parsing relative time expression: '{time_expression}'")
             
             parsed_time = dateparser.parse(time_expression, settings={'RETURN_AS_TIMEZONE_AWARE': True})
             if parsed_time is None:
                 logger.warning(f"Could not parse time expression: {time_expression}")
                 if ctx:
-                    await ctx.error(f"Could not parse time expression: '{time_expression}'")
+                    logger.error(f"Could not parse time expression: '{time_expression}'")
                 return None
             
             result = parsed_time.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
             
             if ctx:
-                await ctx.info(f"Successfully parsed '{time_expression}' to: {result}")
+                logger.info(f"Successfully parsed '{time_expression}' to: {result}")
             
             return result
             
         except Exception as e:
             logger.exception(f"Error parsing time expression '{time_expression}'")
             if ctx:
-                await ctx.error(f"Error parsing time expression '{time_expression}': {str(e)}")
+                logger.error(f"Error parsing time expression '{time_expression}': {str(e)}")
             return None
     
     #logger.info("Registered datetime utility tools")

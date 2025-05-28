@@ -78,7 +78,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                await ctx.info(f"Listing rules for policy: {policy_id}")
+                logger.info(f"Listing rules for policy: {policy_id}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -93,7 +93,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                await ctx.info(f"Executing Okta API request with params: {params}")
+                logger.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_policy_rules(policy_id, params)
@@ -102,12 +102,12 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing rules for policy {policy_id}: {err}")
                 if ctx:
-                    await ctx.error(f"Error listing rules for policy {policy_id}: {err}")
+                    logger.error(f"Error listing rules for policy {policy_id}: {err}")
                 return handle_okta_result(err, "list_policy_rules")
             
             # Apply pagination based on environment variable
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_rules = []
             page_count = 0
@@ -120,7 +120,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
+                    logger.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.get_next_page(resp)
@@ -128,7 +128,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
+                        logger.error(f"Error during pagination: {err}")
                     break
                 
                 if rules:
@@ -136,7 +136,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_rules)} policy rules across {page_count} pages")
+                logger.info(f"Retrieved {len(all_rules)} policy rules across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -158,7 +158,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_policy_rules tool for policy_id {policy_id}")
             if ctx:
-                await ctx.error(f"Error in list_policy_rules tool: {str(e)}")
+                logger.error(f"Error in list_policy_rules tool: {str(e)}")
             return handle_okta_result(e, "list_policy_rules")
         
     @server.tool()
@@ -188,7 +188,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                await ctx.info(f"Getting rule {rule_id} for policy: {policy_id}")
+                logger.info(f"Getting rule {rule_id} for policy: {policy_id}")
             
             # Get the Okta organization URL and API token
             org_url = os.getenv('OKTA_CLIENT_ORGURL')
@@ -214,7 +214,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             url = f"{org_url}/api/v1/policies/{policy_id}/rules/{rule_id}"
             
             if ctx:
-                await ctx.info(f"Making direct API call to: {url}")
+                logger.info(f"Making direct API call to: {url}")
             
             # Use the module-level make_async_request function
             response = await make_async_request(
@@ -228,7 +228,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             rule_data = response
             
             if ctx:
-                await ctx.info(f"Successfully retrieved rule information using direct API call")
+                logger.info(f"Successfully retrieved rule information using direct API call")
             
             # Return the raw JSON response
             return rule_data
@@ -236,7 +236,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in get_policy_rule tool for policy_id {policy_id}, rule_id {rule_id}")
             if ctx:
-                await ctx.error(f"Error in get_policy_rule tool: {str(e)}")
+                logger.error(f"Error in get_policy_rule tool: {str(e)}")
             return handle_okta_result(e, "get_policy_rule")    
         
     @server.tool()
@@ -270,7 +270,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                await ctx.info(f"Listing network zones with filter: {filter_type}")
+                logger.info(f"Listing network zones with filter: {filter_type}")
             
             # Validate parameters
             if limit < 1 or limit > 200:
@@ -288,7 +288,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['filter'] = filter_type
             
             if ctx:
-                await ctx.info(f"Executing Okta API request with params: {params}")
+                logger.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_network_zones(params)
@@ -297,12 +297,12 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing network zones: {err}")
                 if ctx:
-                    await ctx.error(f"Error listing network zones: {err}")
+                    logger.error(f"Error listing network zones: {err}")
                 return handle_okta_result(err, "list_network_zones")
             
             # Apply pagination
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_zones = []
             page_count = 0
@@ -315,7 +315,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Process additional pages if available
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
-                    await ctx.info(f"Retrieving page {page_count + 1}...")
+                    logger.info(f"Retrieving page {page_count + 1}...")
                     await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
                 
                 raw_response = await okta_client.client.get_next_page(resp)
@@ -323,7 +323,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 
                 if err:
                     if ctx:
-                        await ctx.error(f"Error during pagination: {err}")
+                        logger.error(f"Error during pagination: {err}")
                     break
                 
                 if zones:
@@ -331,7 +331,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
             
             if ctx:
-                await ctx.info(f"Retrieved {len(all_zones)} network zones across {page_count} pages")
+                logger.info(f"Retrieved {len(all_zones)} network zones across {page_count} pages")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with enhanced pagination info
@@ -352,7 +352,7 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_network_zones tool")
             if ctx:
-                await ctx.error(f"Error in list_network_zones tool: {str(e)}")
+                logger.error(f"Error in list_network_zones tool: {str(e)}")
             return handle_okta_result(e, "list_network_zones")        
     
     #logger.info("Registered policy management tools")

@@ -44,7 +44,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = min(max(1, limit), 200)
             
             if ctx:
-                await ctx.info(f"Listing applications with parameters: search={search}, limit={limit}")
+                logger.info(f"Listing applications with parameters: search={search}, limit={limit}")
             
             # Prepare request parameters
             params = {
@@ -59,7 +59,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                await ctx.info(f"Executing Okta API request with params: {params}")
+                logger.info(f"Executing Okta API request with params: {params}")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_applications(params)
@@ -68,12 +68,12 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing applications: {err}")
                 if ctx:
-                    await ctx.error(f"Error CTX listing applications: {err}")
+                    logger.error(f"Error CTX listing applications: {err}")
                 return handle_okta_result(err, "list_applications")
             
             # Apply pagination
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_apps = []
             page_count = 0
@@ -85,11 +85,11 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
                     
                     if ctx:
-                        await ctx.info(f"Page {page_count}: Retrieved {len(apps)} applications (total: {len(all_apps)})")
+                        logger.info(f"Page {page_count}: Retrieved {len(apps)} applications (total: {len(all_apps)})")
                 
                 if resp and resp.has_next():
                     if ctx:
-                        await ctx.info("Getting next page...")
+                        logger.info("Getting next page...")
                     
                     # Get next page with small delay to prevent rate limiting
                     await asyncio.sleep(0.2)
@@ -97,15 +97,15 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     
                     if err:
                         if ctx:
-                            await ctx.error(f"Error getting next page: {err}")
+                            logger.error(f"Error getting next page: {err}")
                         break
                 else:
                     if ctx:
-                        await ctx.info("No more pages available.")
+                        logger.info("No more pages available.")
                     break
             
             if ctx:
-                await ctx.info(f"Pagination complete. Retrieved {len(all_apps)} total applications in {page_count} pages.")
+                logger.info(f"Pagination complete. Retrieved {len(all_apps)} total applications in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with pagination info
@@ -124,7 +124,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception("Error in list_applications tool")
             if ctx:
-                await ctx.error(f"Error in list_applications tool: {str(e)}")
+                logger.error(f"Error in list_applications tool: {str(e)}")
             return handle_okta_result(e, "list_applications")
     
     @server.tool()
@@ -140,7 +140,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         """
         try:
             if ctx:
-                await ctx.info(f"Getting detailed information for application: {app_id}")
+                logger.info(f"Getting detailed information for application: {app_id}")
             
             # Get the application by ID
             raw_response = await okta_client.client.get_application(app_id)
@@ -149,11 +149,11 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error getting application {app_id}: {err}")
                 if ctx:
-                    await ctx.error(f"Error getting application {app_id}: {err}")
+                    logger.error(f"Error getting application {app_id}: {err}")
                 return handle_okta_result(err, "get_application")
             
             if ctx:
-                await ctx.info(f"Successfully retrieved application information")
+                logger.info(f"Successfully retrieved application information")
             
             # Format response
             result = app.as_dict()
@@ -163,7 +163,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in get_application tool for app_id {app_id}")
             if ctx:
-                await ctx.error(f"Error in get_application tool: {str(e)}")
+                logger.error(f"Error in get_application tool: {str(e)}")
             return handle_okta_result(e, "get_application")
     
     @server.tool()
@@ -189,7 +189,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = min(max(1, limit), 200)
             
             if ctx:
-                await ctx.info(f"Listing users assigned to application: {app_id}, limit={limit}")
+                logger.info(f"Listing users assigned to application: {app_id}, limit={limit}")
             
             # Prepare request parameters
             params = {
@@ -200,7 +200,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                await ctx.info(f"Executing Okta API request for application users")
+                logger.info(f"Executing Okta API request for application users")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_application_users(app_id, params)
@@ -209,12 +209,12 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing users for application {app_id}: {err}")
                 if ctx:
-                    await ctx.error(f"Error listing application users: {err}")
+                    logger.error(f"Error listing application users: {err}")
                 return handle_okta_result(err, "list_application_users")
             
             # Apply pagination (using the pattern from list_okta_groups)
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_users = []
             page_count = 0
@@ -226,11 +226,11 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
                     
                     if ctx:
-                        await ctx.info(f"Page {page_count}: Retrieved {len(users)} users (total: {len(all_users)})")
+                        logger.info(f"Page {page_count}: Retrieved {len(users)} users (total: {len(all_users)})")
                 
                 if resp and resp.has_next():
                     if ctx:
-                        await ctx.info("Getting next page...")
+                        logger.info("Getting next page...")
                     
                     # Get next page with small delay to prevent rate limiting
                     await asyncio.sleep(0.2)
@@ -238,15 +238,15 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     
                     if err:
                         if ctx:
-                            await ctx.error(f"Error getting next page: {err}")
+                            logger.error(f"Error getting next page: {err}")
                         break
                 else:
                     if ctx:
-                        await ctx.info("No more pages available.")
+                        logger.info("No more pages available.")
                     break
             
             if ctx:
-                await ctx.info(f"Pagination complete. Retrieved {len(all_users)} total users in {page_count} pages.")
+                logger.info(f"Pagination complete. Retrieved {len(all_users)} total users in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with pagination info
@@ -266,7 +266,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_application_users tool for app_id {app_id}")
             if ctx:
-                await ctx.error(f"Error in list_application_users tool: {str(e)}")
+                logger.error(f"Error in list_application_users tool: {str(e)}")
             return handle_okta_result(e, "list_application_users")
         
     @server.tool()
@@ -292,7 +292,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             limit = min(max(1, limit), 200)
             
             if ctx:
-                await ctx.info(f"Listing groups assigned to application: {app_id}, limit={limit}")
+                logger.info(f"Listing groups assigned to application: {app_id}, limit={limit}")
             
             # Prepare request parameters
             params = {
@@ -303,7 +303,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['after'] = after
             
             if ctx:
-                await ctx.info(f"Executing Okta API request for application groups")
+                logger.info(f"Executing Okta API request for application groups")
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_application_group_assignments(app_id, params)
@@ -312,12 +312,12 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             if err:
                 logger.error(f"Error listing groups for application {app_id}: {err}")
                 if ctx:
-                    await ctx.error(f"Error listing application groups: {err}")
+                    logger.error(f"Error listing application groups: {err}")
                 return handle_okta_result(err, "list_application_group_assignments")
             
             # Apply pagination
             if ctx:
-                await ctx.info("Retrieving paginated results...")
+                logger.info("Retrieving paginated results...")
             
             all_groups = []
             page_count = 0
@@ -329,11 +329,11 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     page_count += 1
                     
                     if ctx:
-                        await ctx.info(f"Page {page_count}: Retrieved {len(groups)} groups (total: {len(all_groups)})")
+                        logger.info(f"Page {page_count}: Retrieved {len(groups)} groups (total: {len(all_groups)})")
                 
                 if resp and resp.has_next():
                     if ctx:
-                        await ctx.info("Getting next page...")
+                        logger.info("Getting next page...")
                     
                     # Get next page with small delay to prevent rate limiting
                     await asyncio.sleep(0.2)
@@ -341,15 +341,15 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                     
                     if err:
                         if ctx:
-                            await ctx.error(f"Error getting next page: {err}")
+                            logger.error(f"Error getting next page: {err}")
                         break
                 else:
                     if ctx:
-                        await ctx.info("No more pages available.")
+                        logger.info("No more pages available.")
                     break
             
             if ctx:
-                await ctx.info(f"Pagination complete. Retrieved {len(all_groups)} total groups in {page_count} pages.")
+                logger.info(f"Pagination complete. Retrieved {len(all_groups)} total groups in {page_count} pages.")
                 await ctx.report_progress(100, 100)  # Mark as complete
             
             # Format response with pagination info
@@ -369,7 +369,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         except Exception as e:
             logger.exception(f"Error in list_application_groups tool for app_id {app_id}")
             if ctx:
-                await ctx.error(f"Error in list_application_groups tool: {str(e)}")
+                logger.error(f"Error in list_application_groups tool: {str(e)}")
             return handle_okta_result(e, "list_application_group_assignments")
     
     #logger.info("Registered application management tools")
