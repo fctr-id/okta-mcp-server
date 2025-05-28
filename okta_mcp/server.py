@@ -24,7 +24,7 @@ def create_server():
         )
         
         # FIXED APPROACH: Debug hook for Context class directly
-        # This will catch all ctx.info(), ctx.error(), etc. calls at their source
+        # This will catch all logger.info(), logger.error(), etc. calls at their source
         from mcp.server.fastmcp import Context
         
         # Store the original Context.info/error/warning methods
