@@ -23,31 +23,17 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 
 ## 📋 Table of Contents
 
-- [📋 Table of Contents](#-table-of-contents)
-- [🔍 What is the Model Context Protocol?](#-what-is-the-model-context-protocol)
-- [⚠️ IMPORTANT: Security \& Limitations](#️-important-security--limitations)
-  - [🔄 Data Flow \& Privacy](#-data-flow--privacy)
-  - [📊 Context Window Limitations](#-context-window-limitations)
-  - [🚨 SSE Transport Security Warning](#-sse-transport-security-warning)
-- [🛠️ Available Tools](#️-available-tools)
-- [🚀 Quick Start](#-quick-start)
-  - [Prerequisites](#prerequisites)
-- [🧠 Supported AI Providers](#-supported-ai-providers)
-  - [Currently Supported Providers:](#currently-supported-providers)
-  - [Installation](#installation)
-  - [Configuration \& Usage](#configuration--usage)
-  - [Supported Transports and Launching](#supported-transports-and-launching)
-    - [1. Standard I/O (STDIO) - Recommended](#1-standard-io-stdio---recommended)
-    - [2. Server-Sent Events (SSE) - Advanced Use Only](#2-server-sent-events-sse---advanced-use-only)
-- [⚠️ Good to Know](#️-good-to-know)
-  - [Alpha Release 🧪](#alpha-release-)
-  - [Security First 🛡️](#security-first-️)
-  - [Current Limitations 🔍](#current-limitations-)
-- [🗺️ Roadmap](#️-roadmap)
-- [🆘 Need Help?](#-need-help)
-- [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
-- [👥 Contributors](#-contributors)
-- [⚖️ Legal Stuff](#️-legal-stuff)
+- [Start the SSE container with environment variables](#start-the-sse-container-with-environment-variables)
+- [Configure your MCP client to connect to http://localhost:3000/sse](#configure-your-mcp-client-to-connect-to-httplocalhost3000sse)
+  - [⚠️ Good to Know](#️-good-to-know)
+    - [Alpha Release 🧪](#alpha-release-)
+    - [Security First 🛡️](#security-first-️)
+    - [Current Limitations 🔍](#current-limitations-)
+  - [🗺️ Roadmap](#️-roadmap)
+  - [🆘 Need Help?](#-need-help)
+  - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
+  - [👥 Contributors](#-contributors)
+  - [⚖️ Legal Stuff](#️-legal-stuff)
 
 &nbsp;
 
@@ -249,6 +235,55 @@ python main.py --sse --iunderstandtherisks
 ⚠️ **WARNING**: SSE transport exposes your server via a web endpoint accessible to anyone who can reach your network. Use only in secure environments with proper network protections.
 
 - **For other MCP clients**: Configure according to their documentation for either STDIO or SSE transport.
+
+#### 3. Docker Deployment
+
+The Okta MCP Server provides Docker images for both transport types, offering containerized deployment options.
+
+##### Running Docker Containers
+
+**STDIO Transport (Recommended):**
+For Claude Desktop or other MCP clients, configure to use the Docker container:
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OKTA_CLIENT_ORGURL",
+        "-e", "OKTA_API_TOKEN",
+        "fctrid/okta-mcp-server-stdio:latest"
+      ],
+      "env": {
+        "OKTA_CLIENT_ORGURL": "https://your-org.okta.com",
+        "OKTA_API_TOKEN": "your_api_token"
+      }
+    }
+  }
+}
+```
+
+**SSE Transport (Advanced Use Only):**
+
+# Start the SSE container with environment variables
+```
+docker run -d --name okta-mcp-sse \
+  -p 3000:3000 \
+  -e OKTA_API_TOKEN=your_api_token \
+  -e OKTA_CLIENT_ORGURL=https://your-org.okta.com \
+  fctrid/okta-mcp-server-sse:latest
+```
+
+# Configure your MCP client to connect to http://localhost:3000/sse
+
+> ⚠️ **Important Security Notes for Docker SSE:**
+> - SSE transport in Docker exposes an unauthenticated HTTP endpoint with full Okta access
+> - **Never expose the SSE port (3000) to the public internet**
+> - Use only in secure, controlled network environments
+> - Claude Desktop and many other MCP clients **do not support SSE transport** - they require STDIO
+> - Consider using container orchestration platforms with proper network policies for production use
+
 
 ## ⚠️ Good to Know
 
