@@ -5,21 +5,29 @@
 </div>
 
 <div align="center">
-  <h2>Okta MCP Server (v0.2.0-ALPHA)</h2>
+  <h2>Okta MCP Server (v0.3.0-ALPHA)</h2>
 </div>
 
-The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
+<div align="center">
+  <h3> **🚀 NEW in v0.3.0:** **Streamable HTTP Transport Support!**</h3>
+</div>
 
-<div style="align: center" >
+
+<div align="center">
+The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
+</div>
+
+<div align= "center" >
 <p ><a href="https://github.com/fctr-id/okta-mcp-server">View on GitHub</a> | <a href="https://modelcontextprotocol.io/introduction">Learn about MCP</a> | <a href="https://github.com/fctr-id/okta-ai-agent">Okta AI Agent</a></p>
 </div>
 
-<div >
+<div align="center">
 <h3>Quick Demo</h3>
-</div>
 <p >
   <img src="images/mcp-server.gif" alt="Okta MCP Server Demo" width="1024px" height="auto">
 </p>
+</div>
+
 
 ## 📋 Table of Contents
 
@@ -28,7 +36,7 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 - [⚠️ IMPORTANT: Security \& Limitations](#️-important-security--limitations)
   - [🔄 Data Flow \& Privacy](#-data-flow--privacy)
   - [📊 Context Window Limitations](#-context-window-limitations)
-  - [🚨 SSE Transport Security Warning](#-sse-transport-security-warning)
+  - [🚨 HTTP Transport Security Warning](#-http-transport-security-warning)
 - [🛠️ Available Tools](#️-available-tools)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
@@ -38,8 +46,10 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
   - [Configuration \& Usage](#configuration--usage)
   - [Supported Transports and Launching](#supported-transports-and-launching)
     - [1. Standard I/O (STDIO) - Recommended](#1-standard-io-stdio---recommended)
-    - [2. Server-Sent Events (SSE) - Advanced Use Only](#2-server-sent-events-sse---advanced-use-only)
-- [3. Docker Deployment](#3-docker-deployment)
+    - [2. Streamable HTTP Transport - Modern \& Recommended](#2-streamable-http-transport---modern--recommended)
+    - [3. Remote HTTP Access - High Risk Advanced Use Only](#3-remote-http-access---high-risk-advanced-use-only)
+    - [4. Server-Sent Events (SSE) - Legacy](#4-server-sent-events-sse---legacy)
+- [5. Docker Deployment](#5-docker-deployment)
       - [Running Docker Containers](#running-docker-containers)
   - [Start the SSE container with environment variables](#start-the-sse-container-with-environment-variables)
   - [Configure your MCP client to connect to http://localhost:3000/sse](#configure-your-mcp-client-to-connect-to-httplocalhost3000sse)
@@ -103,14 +113,15 @@ MCP is designed for lightweight workflows similar to Zapier, not bulk data opera
 
 > 💡 **For larger data sets and complex queries:** Consider using the [Okta AI Agent](https://github.com/fctr-id/okta-ai-agent) for larger queries and data sets, The agent  is being enhanced with similar "actionable" features to handle larger datasets and more complex scenarios in the very near future.
 
-### 🚨 SSE Transport Security Warning
+### 🚨 HTTP Transport Security Warning
 
-The SSE over HTTP transport mode has significant security risks:
-- It opens an unauthenticated HTTP server with full access to your Okta tenant
+The HTTP transport modes (both Streamable HTTP and SSE) have significant security risks:
+- They open unauthenticated HTTP servers with full access to your Okta tenant
 - No authentication or authorization is provided
 - Anyone who can reach the network port can issue commands to your Okta environment
+- **EXTREMELY DANGEROUS** when using remote HTTP access via `mcp-remote`
 
-**Best Practice:** Only use the STDIO transport method (default mode) unless you have specific security controls in place.
+**Best Practice:** Only use the STDIO transport method (default mode) unless you have specific security controls in place and understand the risks.
 
 ## 🛠️ Available Tools
 
@@ -218,12 +229,13 @@ To use MCP hosts like Claude Code, vsCode ...etc find the json config below
 
 ### Supported Transports and Launching
 
-The Okta MCP Server supports two transport protocols:
+The Okta MCP Server supports multiple transport protocols:
 
 #### 1. Standard I/O (STDIO) - Recommended
 
-- **Security**: Direct communication through standard input/output streams
+- **Security**: ✅ Direct communication through standard input/output streams
 - **Use case**: Ideal for desktop AI assistants like Claude Desktop
+- **Performance**: ✅ Lightweight and efficient
 - **Configuration**: For Claude Desktop, add to `claude_desktop_config.json`:
   ```json
   {
@@ -243,18 +255,106 @@ The Okta MCP Server supports two transport protocols:
   ```
   *Replace `DIR` with your absolute directory path and `OKTA_API_TOKEN` with your actual token*
 
-#### 2. Server-Sent Events (SSE) - Advanced Use Only
+#### 2. Streamable HTTP Transport - Modern & Recommended
+
+**NEW in v0.3.0!** Modern HTTP-based transport with advanced features:
+
+- **Features**: ✅ Real-time event streaming, session management, resumability support
+- **Performance**: ✅ Better scalability and connection handling
+- **Use case**: Modern web applications and clients supporting HTTP streaming
+- **Security**: ⚠️ Local HTTP server - secure in controlled environments
+
+**Starting the Streamable HTTP Server:**
+```bash
+# Start server with explicit risk acknowledgment
+python main.py --http --iunderstandtherisks
+
+# Server will start on http://localhost:8000/mcp
+# Connect using streamable HTTP compatible clients
+```
+
+**Features:**
+- ✅ **Real-time streaming** - Live progress updates during operations
+- ✅ **Session management** - Maintains connection state
+- ✅ **Event streaming** - Server-Sent Events for real-time notifications
+- ✅ **Better error handling** - Detailed error responses
+- ✅ **Modern protocol** - Based on latest MCP specifications
+
+**For Streamable HTTP Client Testing:**
+```bash
+cd clients
+python mcp-cli-streamable-client.py
+```
+
+#### 3. Remote HTTP Access - High Risk Advanced Use Only
+
+**⚠️ EXTREMELY DANGEROUS - READ CAREFULLY**
+
+For MCP clients that don't natively support remote connections, you can use `mcp-remote` via NPX:
+
+**Prerequisites:**
+- Node.js and NPM installed
+- Okta MCP Server running in HTTP mode
+
+**Setup:**
+```bash
+# 1. Install mcp-remote globally
+npm install -g @anthropic/mcp-remote
+
+# 2. Start your Okta MCP Server in HTTP mode
+python main.py --http --iunderstandtherisks
+
+# 3. Configure your MCP client (e.g., Claude Desktop)
+```
+
+**Claude Desktop Configuration:**
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8000/mcp"
+      ],
+      "env": {
+        "OKTA_CLIENT_ORGURL": "https://dev-1606.okta.com",
+        "OKTA_API_TOKEN": "your_actual_api_token"
+      }
+    }
+  }
+}
+```
+
+**🚨 CRITICAL SECURITY WARNINGS:**
+- **NEVER use in production environments**
+- **NEVER expose the HTTP port (8000) to public networks**
+- **ANYONE with network access can control your Okta tenant**
+- **No authentication or authorization protection**
+- **All Okta operations are exposed without restrictions**
+- **Use only in isolated, secure development environments**
+- **Consider this approach only if STDIO transport is absolutely not feasible**
+
+**When might you need this approach:**
+- Testing MCP integrations that require HTTP transport
+- Specific client applications that can't use STDIO
+- Development scenarios requiring HTTP debugging
+- **NEVER for production or shared environments**
+
+#### 4. Server-Sent Events (SSE) - Legacy
+
+**⚠️ DEPRECATED:** SSE transport is being superseded by Streamable HTTP transport.
 
 ```bash
 # Run in SSE mode (requires explicit risk acknowledgment)
 python main.py --sse --iunderstandtherisks
 ```
 
-⚠️ **WARNING**: SSE transport exposes your server via a web endpoint accessible to anyone who can reach your network. Use only in secure environments with proper network protections.
+- **Use case**: Legacy MCP clients requiring SSE
+- **Security**: ⚠️ Same HTTP security risks as Streamable HTTP
+- **Recommendation**: Use Streamable HTTP transport instead
 
-- **For other MCP clients**: Configure according to their documentation for either STDIO or SSE transport.
-
-## 3. Docker Deployment
+## 5. Docker Deployment
 
 The Okta MCP Server provides Docker images for both transport types, offering containerized deployment options.
 
@@ -282,7 +382,19 @@ For Claude Desktop or other MCP clients, configure to use the Docker container:
 }
 ```
 
-**SSE Transport (Advanced Use Only):**
+**Streamable HTTP Transport:**
+```bash
+# Start the Streamable HTTP container
+docker run -d --name okta-mcp-http \
+  -p 8000:8000 \
+  -e OKTA_API_TOKEN=your_api_token \
+  -e OKTA_CLIENT_ORGURL=https://your-org.okta.com \
+  fctrid/okta-mcp-server-http:latest
+
+# Configure your MCP client to connect to http://localhost:8000/mcp
+```
+
+**SSE Transport (Legacy):**
 
 ### Start the SSE container with environment variables
 ```
@@ -295,11 +407,11 @@ docker run -d --name okta-mcp-sse \
 
 ### Configure your MCP client to connect to http://localhost:3000/sse
 
-> ⚠️ **Important Security Notes for Docker SSE:**
-> - SSE transport in Docker exposes an unauthenticated HTTP endpoint with full Okta access
-> - **Never expose the SSE port (3000) to the public internet**
+> ⚠️ **Important Security Notes for Docker HTTP Transports:**
+> - HTTP transports in Docker expose unauthenticated HTTP endpoints with full Okta access
+> - **Never expose HTTP ports to the public internet**
 > - Use only in secure, controlled network environments
-> - Claude Desktop and many other MCP clients **do not support SSE transport** - they require STDIO
+> - Claude Desktop and many other MCP clients **do not support HTTP transports natively**
 > - Consider using container orchestration platforms with proper network policies for production use
 
 
@@ -326,13 +438,18 @@ docker run -d --name okta-mcp-sse \
 
 ## 🗺️ Roadmap
 
-Current progress:
+**v0.3.0 - Current (NEW!)**
+- [x] Streamable HTTP transport support
+- [x] Real-time event streaming
+- [x] Session management and resumability
+- [x] Enhanced client applications
+
+**v0.2.0 - Previous**
 - [x] MCP protocol compliance
 - [x] Basic Okta API integration
 - [x] Read-only operations support
 
-Future plans include:
-- [ ] Comprehensive documentation
+**Future plans include:**
 - [ ] Complete user lifecycle operations
 - [ ] Application assignment management
 - [ ] Group membership operations
