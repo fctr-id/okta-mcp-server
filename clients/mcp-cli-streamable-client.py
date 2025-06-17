@@ -6,6 +6,7 @@ import os
 import sys
 import asyncio
 import json
+import re
 from typing import Dict, Any, Optional, List
 from enum import Enum
 from datetime import datetime
@@ -34,6 +35,42 @@ class AIProvider(Enum):
     VERTEX_AI = "vertex_ai"
     OPENAI_COMPATIBLE = "openai_compatible"
 
+def parse_json_from_response(response: str) -> tuple[str, bool]:
+    """
+    Parse JSON content from markdown code blocks or return cleaned response.
+    Returns (cleaned_content, is_json_format)
+    """
+    if not response:
+        return response, False
+    
+    # Try to extract JSON from markdown code blocks
+    json_match = re.search(r'```json\s*\n(.*?)\n```', response, re.DOTALL | re.IGNORECASE)
+    if json_match:
+        json_content = json_match.group(1).strip()
+        try:
+            # Validate it's proper JSON
+            parsed = json.loads(json_content)
+            # Return pretty-formatted JSON
+            return json.dumps(parsed, indent=2), True
+        except json.JSONDecodeError:
+            # If JSON is invalid, return the content without code blocks
+            return json_content, False
+    
+    # Try to extract any code block content
+    code_match = re.search(r'```.*?\n(.*?)\n```', response, re.DOTALL)
+    if code_match:
+        return code_match.group(1).strip(), False
+    
+    # Check if the response itself is valid JSON (without code blocks)
+    try:
+        parsed = json.loads(response.strip())
+        return json.dumps(parsed, indent=2), True
+    except json.JSONDecodeError:
+        pass
+    
+    # No code blocks found, return original
+    return response, False
+
 class OktaMCPStreamableClient:
     """
     MCP Client for connecting to Okta MCP Server via Streamable HTTP transport.
@@ -43,7 +80,7 @@ class OktaMCPStreamableClient:
     def __init__(self, server_url: str = None, debug: bool = False):
         self.console = Console()
         self.debug = debug
-        self.server_url = server_url or "http://localhost:3000/mcp"
+        self.server_url = server_url or "http://localhost:8000/mcp"
         self.model = self._get_model()
         self.agent = None
         self.mcp_server = None
@@ -233,14 +270,16 @@ class OktaMCPStreamableClient:
                     
                 progress.update(task, description="Query completed!")
                 
-            return result.output
+            # Parse JSON from the response if present
+            cleaned_response, is_json = parse_json_from_response(result.output)
+            return cleaned_response, is_json
             
         except Exception as e:
             self.console.print(f"[red]Error executing query: {e}[/red]")
             if self.debug:
                 import traceback
                 self.console.print(f"[dim]{traceback.format_exc()}[/dim]")
-            return None
+            return None, False
 
     def display_connection_status(self):
         """Display current connection status."""
@@ -276,6 +315,11 @@ class OktaMCPStreamableClient:
 • "Show me login events from yesterday"
 • "List users created in the last week"
 • "Find failed login attempts from the last 24 hours"
+
+[bold blue]Response Format:[/bold blue]
+• JSON responses are automatically parsed and syntax-highlighted
+• Non-JSON responses are displayed as formatted text
+• Use 'debug on' to see raw responses
         """
         
         help_panel = Panel(
@@ -305,6 +349,43 @@ class OktaMCPStreamableClient:
         except Exception as e:
             self.console.print(f"[red]Error listing tools: {e}[/red]")
 
+    def display_response(self, content: str, is_json: bool, duration: float):
+        """Display response with appropriate formatting."""
+        if is_json:
+            # Display as syntax-highlighted JSON
+            try:
+                syntax = Syntax(
+                    content, 
+                    "json", 
+                    theme="monokai", 
+                    line_numbers=True,
+                    word_wrap=True
+                )
+                
+                result_panel = Panel(
+                    syntax,
+                    title=f"JSON Response (took {duration:.2f}s)",
+                    border_style="green"
+                )
+                self.console.print(result_panel)
+                
+            except Exception as e:
+                # Fallback to regular text if syntax highlighting fails
+                result_panel = Panel(
+                    content,
+                    title=f"Response (took {duration:.2f}s)",
+                    border_style="green"
+                )
+                self.console.print(result_panel)
+        else:
+            # Display as regular text with formatting
+            result_panel = Panel(
+                content,
+                title=f"Response (took {duration:.2f}s)",
+                border_style="green"
+            )
+            self.console.print(result_panel)
+
 async def main():
     """Main CLI interface."""
     console = Console()
@@ -319,7 +400,7 @@ async def main():
     ))
     
     # Get server URL (default to localhost)
-    server_url = os.getenv('MCP_SERVER_URL', 'http://localhost:3000/mcp')
+    server_url = os.getenv('MCP_SERVER_URL', 'http://localhost:8000/mcp')
     debug_mode = os.getenv('DEBUG', 'false').lower() == 'true'
     
     # Initialize client
@@ -366,14 +447,17 @@ async def main():
                     result = await client.run_query(user_input)
                     end_time = datetime.now()
                     
-                    if result:
-                        # Display result
-                        result_panel = Panel(
-                            result,
-                            title=f"Response (took {(end_time - start_time).total_seconds():.2f}s)",
-                            border_style="green"
-                        )
-                        console.print(result_panel)
+                    if result and result[0]:  # result is now a tuple (content, is_json)
+                        content, is_json = result
+                        duration = (end_time - start_time).total_seconds()
+                        
+                        # Show raw response in debug mode
+                        if client.debug:
+                            console.print(f"[dim]Raw response: {content}[/dim]")
+                            console.print(f"[dim]Detected as JSON: {is_json}[/dim]")
+                        
+                        # Display formatted response
+                        client.display_response(content, is_json, duration)
                     
             except (KeyboardInterrupt, EOFError):
                 break

@@ -28,18 +28,22 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Okta MCP Server")
     
     # Transport flags
+    parser.add_argument("--http", action="store_true", 
+                      help="Use Streamable HTTP transport (modern, recommended)")
     parser.add_argument("--sse", action="store_true", 
-                      help="Use SSE transport instead of default STDIO")
+                      help="Use SSE transport (legacy, deprecated)")
+    parser.add_argument("--stdio", action="store_true", 
+                      help="Use STDIO transport (default)")
     parser.add_argument("--iunderstandtherisks", action="store_true",
-                      help="Acknowledge security risks of using SSE transport")
+                      help="Acknowledge security risks of using HTTP-based transports")
     
-    # SSE configuration
+    # HTTP/SSE configuration
     parser.add_argument("--host", default="0.0.0.0", 
-                      help="Host to bind to for SSE transport (default: 0.0.0.0)")
+                      help="Host to bind to for HTTP transports (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=3000, 
-                      help="Port to run on for SSE transport (default: 3000)")
+                      help="Port to run on for HTTP transports (default: 3000)")
     parser.add_argument("--reload", action="store_true", 
-                      help="Enable auto-reload for development (SSE only)")
+                      help="Enable auto-reload for development (HTTP transports only)")
     
     # General configuration
     parser.add_argument("--log-level", default="INFO", 
@@ -70,33 +74,76 @@ def main():
         logger.error("OKTA_API_TOKEN=your-api-token")
         return 1
     
-    # Import server module
-    from okta_mcp.server import create_server, run_with_stdio, run_with_sse
-    
     try:
-        # Create server
-        server = create_server()
-        
-        # Check transport selection
-        if args.sse:
+        # Handle transport-specific setup BEFORE importing server module
+        if args.http:
+            # Check for risk acknowledgment
+            if not args.iunderstandtherisks:
+                logger.error("HTTP transport requires explicit risk acknowledgment")
+                logger.error("Add --iunderstandtherisks flag to run with HTTP transport")
+                return 1
+            
+            # Show security warning
+            logger.warning("SECURITY WARNING: HTTP transport exposes API operations over network")
+            logger.warning("Do not use in production without proper security measures")
+            
+            # CRITICAL: Set sys.argv BEFORE importing FastMCP modules
+            original_argv = sys.argv.copy()
+            sys.argv = [
+                sys.argv[0],  # Keep original script name
+                '--port', str(args.port),
+                '--host', args.host,
+                '--log-level', args.log_level
+            ]
+            
+            logger.info(f"Modified sys.argv for FastMCP: {sys.argv}")
+            
+            try:
+                # Import server module AFTER setting sys.argv
+                from okta_mcp.server import create_server, run_with_streamable_http
+                
+                # Create server (FastMCP should read the modified sys.argv)
+                server = create_server()
+                
+                # Run with Streamable HTTP transport
+                logger.info("Starting with Streamable HTTP transport (recommended)")
+                run_with_streamable_http(server, args.host, args.port, args.reload)
+                
+            finally:
+                # Restore original sys.argv
+                sys.argv = original_argv
+                
+        elif args.sse:
             # Check for risk acknowledgment
             if not args.iunderstandtherisks:
                 logger.error("SSE transport requires explicit risk acknowledgment")
                 logger.error("Add --iunderstandtherisks flag to run with SSE transport")
                 return 1
             
-            # Show security warning
+            # Show security warning and deprecation notice
             logger.warning("SECURITY WARNING: SSE transport exposes API operations over HTTP")
+            logger.warning("DEPRECATION WARNING: SSE transport is deprecated, use --http instead")
             logger.warning("Do not use in production without proper security measures")
             
-            # Run with SSE transport
+            # Import normally for SSE (doesn't need sys.argv modification)
+            from okta_mcp.server import create_server, run_with_sse
+            
+            # Create and run server
+            server = create_server()
+            logger.info("Starting with SSE transport (deprecated)")
             run_with_sse(server, args.host, args.port, args.reload)
+            
         else:
-            # Run with STDIO transport (default)
-            logger.info("Using default STDIO transport")
+            # Import normally for STDIO
+            from okta_mcp.server import create_server, run_with_stdio
+            
+            # Create and run server
+            server = create_server()
+            logger.info("Starting with STDIO transport (default, secure)")
             run_with_stdio(server)
         
         return 0
+        
     except Exception as e:
         logger.error(f"Error starting server: {e}")
         logger.exception(e)  # Print full exception details for debugging

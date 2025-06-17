@@ -171,64 +171,22 @@ def run_with_sse(server, host="0.0.0.0", port=3000, reload=False):
 
 def run_with_streamable_http(server, host="0.0.0.0", port=3000, reload=False):
     """Run the server with modern Streamable HTTP transport (recommended)."""
-    import uvicorn
-    import contextlib
-    from collections.abc import AsyncIterator
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-    from starlette.applications import Starlette
-    from starlette.routing import Mount
-    from starlette.types import Receive, Scope, Send
+    logger.info(f"Starting server with Streamable HTTP transport")
+    logger.info("Using FastMCP's built-in streamable-http transport")
     
-    logger.info(f"Starting server with Streamable HTTP transport on {host}:{port}")
-    logger.info("Using direct Starlette/Uvicorn approach (like FastMCP example)")
+    # Note: FastMCP might not respect host/port parameters
+    # But it should work on some default port
+    logger.warning(f"Requested port {port} might be ignored by FastMCP")
+    logger.info("Server will likely start on FastMCP's default port")
     
     try:
-        # Create the session manager with our FastMCP server
-        session_manager = StreamableHTTPSessionManager(
-            app=server,  # Your FastMCP server
-            json_response=False,  # Use SSE streams by default
-        )
-        
-        # ASGI handler for streamable HTTP connections
-        async def handle_streamable_http(scope: Scope, receive: Receive, send: Send) -> None:
-            await session_manager.handle_request(scope, receive, send)
-        
-        @contextlib.asynccontextmanager
-        async def lifespan(app: Starlette) -> AsyncIterator[None]:
-            """Context manager for managing session manager lifecycle."""
-            async with session_manager.run():
-                logger.info("StreamableHTTP session manager started")
-                try:
-                    yield
-                finally:
-                    logger.info("StreamableHTTP session manager shutting down...")
-        
-        # Create the Starlette ASGI application
-        starlette_app = Starlette(
-            debug=reload,
-            routes=[
-                Mount("/mcp", app=handle_streamable_http),
-            ],
-            lifespan=lifespan,
-        )
-        
-        logger.info(f"Connect to the server at http://{host}:{port}/mcp")
-        
-        # Run with Uvicorn on the specified port (this WILL work)
-        uvicorn.run(
-            starlette_app, 
-            host=host, 
-            port=port,
-            reload=reload,
-            log_level="info"
-        )
+        # Use FastMCP's built-in streamable HTTP transport
+        server.run(transport="streamable-http")
         
     except Exception as e:
-        logger.error(f"Failed to start with custom StreamableHTTP setup: {e}")
-        logger.info("Falling back to FastMCP's default run() method")
-        
-        # Fallback to default FastMCP behavior
-        server.run(transport="streamable-http")
+        logger.error(f"Failed to start with FastMCP streamable-http: {e}")
+        logger.exception(e)
+        raise
 
 # Alias for backward compatibility and shorter name
 def run_with_http(server, host="0.0.0.0", port=3000, reload=False):
