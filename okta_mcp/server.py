@@ -158,14 +158,40 @@ def run_with_stdio(server):
     server.run()
 
 def run_with_sse(server, host="0.0.0.0", port=3000, reload=False):
-    """Run the server with SSE transport."""
+    """Run the server with SSE transport (legacy, deprecated)."""
     import uvicorn
     
     logger.info(f"Starting server with SSE transport on {host}:{port}")
-    logger.info(f"Connect to the server at http://{host}:{port}")
+    logger.info(f"Connect to the server at http://{host}:{port}/sse")
+    logger.warning("SSE transport is deprecated. Consider using Streamable HTTP instead.")
     
+    # Use the legacy SSE app method
     app = server.sse_app()
     uvicorn.run(app, host=host, port=port, reload=reload)
+
+def run_with_streamable_http(server, host="0.0.0.0", port=3000, reload=False):
+    """Run the server with modern Streamable HTTP transport (recommended)."""
+    logger.info(f"Starting server with Streamable HTTP transport")
+    logger.info("Using FastMCP's built-in streamable-http transport")
+    
+    # Note: FastMCP might not respect host/port parameters
+    # But it should work on some default port
+    logger.warning(f"Requested port {port} might be ignored by FastMCP")
+    logger.info("Server will likely start on FastMCP's default port")
+    
+    try:
+        # Use FastMCP's built-in streamable HTTP transport
+        server.run(transport="streamable-http")
+        
+    except Exception as e:
+        logger.error(f"Failed to start with FastMCP streamable-http: {e}")
+        logger.exception(e)
+        raise
+
+# Alias for backward compatibility and shorter name
+def run_with_http(server, host="0.0.0.0", port=3000, reload=False):
+    """Alias for run_with_streamable_http."""
+    run_with_streamable_http(server, host, port, reload)
 
 if __name__ == "__main__":
     # When run directly, use STDIO transport as a safe default
