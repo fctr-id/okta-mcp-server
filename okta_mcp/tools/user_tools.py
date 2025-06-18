@@ -75,7 +75,6 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
             # Priority: search > query > filter
             if search:
                 params['search'] = search
-                # Sort parameters only work with search queries
                 params['sortBy'] = sort_by
                 params['sortOrder'] = sort_order
             elif query:
@@ -97,56 +96,62 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
                     logger.error(f"Error listing users: {err}")
                 return handle_okta_result(err, "list_users")
             
-            # Apply pagination based on environment variable
-            if ctx:
-                logger.info("Retrieving paginated results...")
-            
-            all_users = []
-            page_count = 0
-            
-            # Process first page
-            if users:
-                all_users.extend(users)
-                page_count += 1
+            # Collect all users (including pagination)
+            all_users = users if users else []
+            page_count = 1
             
             # Process additional pages if available
-            while resp and hasattr(resp, 'has_next') and resp.has_next():
+            while resp and resp.has_next():
                 if ctx:
                     logger.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count, page_count + 5)  # Estimate 5 pages total
+                    await ctx.report_progress(page_count * 10, 100)
                 
-                raw_response = await okta_client.client.list_users_next(resp)
-                users, resp, err = normalize_okta_response(raw_response)
-                
-                if err:
+                try:
+                    # Use the correct SDK pagination method
+                    users_page, err = await resp.next()
+                    
+                    if err:
+                        if ctx:
+                            logger.error(f"Error during pagination: {err}")
+                        break
+                    
+                    if users_page:
+                        all_users.extend(users_page)
+                        page_count += 1
+                        
+                        # Safety check to prevent infinite loops
+                        if page_count > 50:
+                            if ctx:
+                                logger.warning("Reached maximum page limit (50), stopping pagination")
+                            break
+                    else:
+                        break
+                        
+                except StopAsyncIteration:
+                    # This is expected when there are no more pages
                     if ctx:
-                        logger.error(f"Error during pagination: {err}")
+                        logger.info("Reached end of pagination")
                     break
-                
-                if users:
-                    all_users.extend(users)
-                    page_count += 1
-            
+                except Exception as pagination_error:
+                    if ctx:
+                        logger.error(f"Pagination error: {pagination_error}")
+                    break
+
             if ctx:
                 logger.info(f"Retrieved {len(all_users)} users across {page_count} pages")
-                await ctx.report_progress(100, 100)  # Mark as complete
+                await ctx.report_progress(100, 100)
             
-            # Format response with enhanced pagination information
-            result = {
+            # Format and return results
+            return {
                 "users": [user.as_dict() for user in all_users],
                 "pagination": {
-                    "limit": limit,
-                    "page_count": page_count,
+                    "total_pages": page_count,
                     "total_results": len(all_users),
-                    "has_more": bool(resp.has_next()) if hasattr(resp, 'has_next') else False,
-                    "self": resp.self if hasattr(resp, 'self') else None,
-                    "next": resp.next if hasattr(resp, 'next') and resp.has_next() else None
+                    "limit_per_page": limit
                 }
             }
-            
-            return result
         
-        except Exception as e:
+        except Exception as e:       
             logger.exception("Error in list_users tool")
             if ctx:
                 logger.error(f"Error in list_users tool: {str(e)}")
