@@ -9,12 +9,6 @@ import argparse
 from dotenv import load_dotenv
 
 # Add this right after imports
-try:
-    import mcp.server.lowlevel.server as mcp_server
-    mcp_server.VERBOSE_LOGGING = False  # This will disable the processing request logs
-    logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
-except ImportError:
-    print("Could not import mcp server module to disable verbose logging")
 
 # Configure logging
 logging.basicConfig(
@@ -22,6 +16,8 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("okta_mcp")
+
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -73,6 +69,14 @@ def main():
         logger.error("OKTA_CLIENT_ORGURL=https://your-org.okta.com")
         logger.error("OKTA_API_TOKEN=your-api-token")
         return 1
+        # Add debug mode
+        
+    if args.log_level == "DEBUG" and args.http:
+        logger.info("Starting in debug mode with low-level server")
+        from okta_mcp.debug_server import run_debug_server
+        import asyncio
+        asyncio.run(run_debug_server())
+        return 0
     
     try:
         # Handle transport-specific setup BEFORE importing server module

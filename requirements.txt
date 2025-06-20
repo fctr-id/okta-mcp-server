@@ -2,7 +2,7 @@ pydantic
 pydantic-ai==0.2.18
 okta
 python-dotenv
-mcp
 uvicorn
 fastapi
 dateparser
+fastmcp

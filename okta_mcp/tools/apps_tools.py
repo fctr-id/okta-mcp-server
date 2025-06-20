@@ -2,8 +2,7 @@
 
 import logging
 from typing import List, Dict, Any, Optional
-from mcp.server.fastmcp import FastMCP, Context
-from mcp.types import TextContent
+from fastmcp import FastMCP, Context
 import asyncio
 from okta_mcp.utils.okta_client import OktaMcpClient
 from okta_mcp.utils.error_handling import handle_okta_result

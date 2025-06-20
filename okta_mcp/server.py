@@ -1,113 +1,55 @@
 """Main MCP server implementation for Okta."""
-import os, datetime
+import os
 import logging
-from mcp.server.fastmcp import FastMCP, Context
+from typing import List
+from fastmcp import FastMCP, Context
+from fastmcp.client.sampling import RequestContext, SamplingMessage, SamplingParams
 
-# Import the RequestManager
-from okta_mcp.utils.request_manager import RequestManager
-
-# Configure logging
 logger = logging.getLogger("okta_mcp")
 
-def create_server():
-    """Create and configure the MCP server for either STDIO or SSE transport."""
+async def sampling_handler(
+    messages: List[SamplingMessage],
+    params: SamplingParams,
+    ctx: RequestContext,
+) -> str:
+    """Handle sampling requests using configured AI model."""
+    
     try:
-        # Create the Okta MCP server
-        mcp = FastMCP(
-            "Okta MCP Server", 
-            capabilities={
-                "tools": {
-                    "listChanged": True  # Enable tool change notifications
-                },
-                "logging": {}
-            }
+        from okta_mcp.utils.model_provider import get_model
+        
+        model = get_model()
+        system_instruction = params.systemPrompt or "You are a helpful assistant"
+        
+        payload = [{"role": "system", "content": system_instruction}]
+        for m in messages:
+            if m.content.type == "text":
+                payload.append({"role": "user", "content": m.content.text})
+        
+        response = model.chat.completions.create(
+            messages=payload,
+            model="gpt-4o-mini",
+            max_tokens=getattr(params, 'maxTokens', 150)
         )
         
-        # FIXED APPROACH: Debug hook for Context class directly
-        # This will catch all logger.info(), logger.error(), etc. calls at their source
-        from mcp.server.fastmcp import Context
+        return response.choices[0].message.content
         
-        # Store the original Context.info/error/warning methods
-        original_info = Context.info
-        original_error = Context.error
-        original_warning = Context.warning
+    except Exception as e:
+        logger.error(f"Sampling error: {e}")
+        return f"AI processing failed: {str(e)}"
+
+def create_server():
+    """Create and configure the MCP server."""
+    try:
+        # Create server with sampling handler
+        mcp = FastMCP("Okta MCP Server")
         
-        # Add debugging output to all context methods:
+        # Register sampling handler (try different methods)
+        if hasattr(mcp, 'set_sampling_handler'):
+            mcp.set_sampling_handler(sampling_handler)
+        else:
+            mcp.sampling_handler = sampling_handler
         
-        async def debug_info(self, message):
-            """Enhanced info method with direct console output and proper notification."""
-            # Still print for debugging
-            print(f"\n[CTX INFO] {message}\n")
-            
-            # Create a notification using the connection's method directly
-            # This avoids the import error and uses the correct way to send notifications
-            if hasattr(self, '_conn') and self._conn:
-                try:
-                    await self._conn.send_notification(
-                        method="notifications/message",
-                        params={
-                            "level": "info",
-                            "data": {
-                                "message": message
-                            }
-                        }
-                    )
-                except Exception as e:
-                    print(f"Error sending notification: {e}")
-            
-            # Also call the original method
-            return await original_info(self, message)
-        
-        async def debug_error(self, message):
-            """Enhanced error method with direct console output and proper notification."""
-            print(f"\n[CTX ERROR] {message}\n")
-            
-            # Create a notification using the connection's method directly
-            if hasattr(self, '_conn') and self._conn:
-                try:
-                    await self._conn.send_notification(
-                        method="notifications/message",
-                        params={
-                            "level": "error",
-                            "data": {
-                                "message": message
-                            }
-                        }
-                    )
-                except Exception as e:
-                    print(f"Error sending notification: {e}")
-            
-            # Also call the original method
-            return await original_error(self, message)
-        
-        async def debug_warning(self, message):
-            """Enhanced warning method with direct console output and proper notification."""
-            print(f"\n[CTX WARNING] {message}\n")
-            
-            # Create a notification using the connection's method directly
-            if hasattr(self, '_conn') and self._conn:
-                try:
-                    await self._conn.send_notification(
-                        method="notifications/message",
-                        params={
-                            "level": "warning",
-                            "data": {
-                                "message": message
-                            }
-                        }
-                    )
-                except Exception as e:
-                    print(f"Error sending notification: {e}")
-            
-            # Also call the original method
-            return await original_warning(self, message)
-        
-        # IMPORTANT: Actually replace the methods on the Context class
-        Context.info = debug_info
-        Context.error = debug_error
-        Context.warning = debug_warning    
-        
-        # Create Okta client
+        # Rest of your existing setup...
         from okta_mcp.utils.okta_client import create_okta_client, OktaMcpClient
         
         logger.info("Initializing Okta client")
@@ -116,85 +58,56 @@ def create_server():
             api_token=os.getenv("OKTA_API_TOKEN")
         )
         
-        # Initialize the RequestManager with concurrent limit from environment
-        # Default to 15 if not specified (Developer free tier)
+        from okta_mcp.utils.request_manager import RequestManager
         concurrent_limit = int(os.getenv("OKTA_CONCURRENT_LIMIT", "15"))
-        logger.info(f"Initializing RequestManager with concurrent limit: {concurrent_limit}")
         request_manager = RequestManager(concurrent_limit)
         
-        # Pass the request manager to the Okta MCP client
         okta_mcp_client = OktaMcpClient(okta_client, request_manager=request_manager)
         
-        # Get the tool registry singleton
         from okta_mcp.tools.tool_registry import ToolRegistry
         registry = ToolRegistry()
         
-        # Initialize the registry with the server
         logger.info("Initializing tool registry")
         registry.initialize_server(mcp)
         
-        # Register tools using the registry
         logger.info("Registering tools")
         registry.register_all_tools(mcp, okta_mcp_client)
         
-        # Store the request manager on the server for use in middleware or interceptors
         mcp.request_manager = request_manager
         
-        logger.info("MCP server created and tools registered successfully")
+        logger.info("MCP server created successfully with sampling handler")
         return mcp
     
     except Exception as e:
         logger.error(f"Error creating MCP server: {e}")
         raise
 
-# Non-async function for STDIO transport
+# Keep your existing run functions unchanged
 def run_with_stdio(server):
     """Run the server with STDIO transport."""
-    import anyio
-    
     logger.info("Starting server with STDIO transport")
-    
-    # Use the non-async run method which handles its own event loop
     server.run()
 
 def run_with_sse(server, host="0.0.0.0", port=3000, reload=False):
-    """Run the server with SSE transport (legacy, deprecated)."""
-    import uvicorn
-    
+    """Run the server with SSE transport (deprecated)."""
+    logger.warning("SSE transport is deprecated, use --http instead")
     logger.info(f"Starting server with SSE transport on {host}:{port}")
-    logger.info(f"Connect to the server at http://{host}:{port}/sse")
-    logger.warning("SSE transport is deprecated. Consider using Streamable HTTP instead.")
     
-    # Use the legacy SSE app method
     app = server.sse_app()
+    
+    import uvicorn
     uvicorn.run(app, host=host, port=port, reload=reload)
 
-def run_with_streamable_http(server, host="0.0.0.0", port=3000, reload=False):
-    """Run the server with modern Streamable HTTP transport (recommended)."""
-    logger.info(f"Starting server with Streamable HTTP transport")
-    logger.info("Using FastMCP's built-in streamable-http transport")
-    
-    # Note: FastMCP might not respect host/port parameters
-    # But it should work on some default port
-    logger.warning(f"Requested port {port} might be ignored by FastMCP")
-    logger.info("Server will likely start on FastMCP's default port")
+def run_with_http(server, host="0.0.0.0", port=3000):
+    """Run the server with HTTP transport."""
+    logger.info("Starting server with HTTP transport")
     
     try:
-        # Use FastMCP's built-in streamable HTTP transport
+        server.run(transport="streamable-http", host=host, port=port)
+    except TypeError:
+        logger.warning("FastMCP doesn't accept host/port, using defaults")
         server.run(transport="streamable-http")
-        
-    except Exception as e:
-        logger.error(f"Failed to start with FastMCP streamable-http: {e}")
-        logger.exception(e)
-        raise
-
-# Alias for backward compatibility and shorter name
-def run_with_http(server, host="0.0.0.0", port=3000, reload=False):
-    """Alias for run_with_streamable_http."""
-    run_with_streamable_http(server, host, port, reload)
 
 if __name__ == "__main__":
-    # When run directly, use STDIO transport as a safe default
-    mcp = create_server()
-    
-    run_with_stdio(mcp)
+    server = create_server()
+    run_with_stdio(server)
