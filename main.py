@@ -71,12 +71,6 @@ def main():
         return 1
         # Add debug mode
         
-    if args.log_level == "DEBUG" and args.http:
-        logger.info("Starting in debug mode with low-level server")
-        from okta_mcp.debug_server import run_debug_server
-        import asyncio
-        asyncio.run(run_debug_server())
-        return 0
     
     try:
         # Handle transport-specific setup BEFORE importing server module
@@ -104,14 +98,14 @@ def main():
             
             try:
                 # Import server module AFTER setting sys.argv
-                from okta_mcp.server import create_server, run_with_streamable_http
+                from okta_mcp.server import create_server, run_with_http
                 
                 # Create server (FastMCP should read the modified sys.argv)
                 server = create_server()
                 
                 # Run with Streamable HTTP transport
                 logger.info("Starting with Streamable HTTP transport (recommended)")
-                run_with_streamable_http(server, args.host, args.port, args.reload)
+                run_with_http(server, args.host, args.port)
                 
             finally:
                 # Restore original sys.argv
