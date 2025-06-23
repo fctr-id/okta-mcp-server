@@ -17,18 +17,48 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
     
     @server.tool()
     async def list_okta_applications(
-        search: str = Field(default="", description="Okta expression to filter applications using operators: eq, ne, co, sw, ew, pr, gt, lt, ge"),
-        max_results: int = Field(default=50, description="Maximum applications to return (1-100). Limited for LLM context window."),
+        search: str = Field(default="", description="Okta expression to filter applications"),
+        max_results: int = Field(default=50, ge=1, le=100, description="Maximum applications to return (1-100)"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta applications with filtering - limited to 50 apps by default for context efficiency. Use search filters like 'profile.name co \"Slack\"' or 'status eq \"ACTIVE\"' to find specific applications."""
+        """List Okta applications with filtering - limited to 50 apps by default for context efficiency.
+        
+        IMPORTANT LIMITATION: Returns only first 50 applications by default (max 100) to stay within 
+        LLM context limits. Use specific search filters to find the applications you need.
+        
+        Search Parameter:
+        Uses Okta expression language to filter applications with operators:
+        • eq (equals), ne (not equals), co (contains), sw (starts with), ew (ends with)
+        • pr (present), gt (greater than), lt (less than), ge (>=), le (<=)
+        
+        Common Application Filters:
+        • profile.name co "Slack" - Applications containing "Slack" in name
+        • status eq "ACTIVE" - Only active applications
+        • status eq "INACTIVE" - Only inactive applications
+        • signOnMode eq "SAML_2_0" - SAML applications only
+        • signOnMode eq "OPENID_CONNECT" - OIDC applications only
+        • profile.label sw "Test" - Applications with labels starting with "Test"
+        • lastUpdated gt "2024-01-01T00:00:00.000Z" - Recently updated applications
+        
+        Application Sign-On Modes:
+        • BOOKMARK, BASIC_AUTH, BROWSER_PLUGIN, SECURE_PASSWORD_STORE
+        • SAML_2_0, WS_FEDERATION, OPENID_CONNECT, AUTO_LOGIN
+        
+        Examples:
+        • 'profile.name co "Office"' - Find Office 365 or similar apps
+        • 'status eq "ACTIVE" and signOnMode eq "SAML_2_0"' - Active SAML apps
+        • 'profile.label sw "Prod"' - Production environment apps
+        
+        Use search filters to find specific applications rather than browsing all apps.
+        Returns application details including ID, name, label, status, and sign-on configuration.
+        """
         try:
             # Validate max_results parameter
             if max_results < 1 or max_results > 100:
                 raise ValueError("max_results must be between 1 and 100")
             
             if ctx:
-                logger.info(f"Listing applications with search={search}, max_results={max_results}")
+                logger.info(f"SERVER: Executing list_okta_applications with search={search}, max_results={max_results}")
             
             # Prepare request parameters
             params = {'limit': min(max_results, 100)}
@@ -38,6 +68,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if ctx:
                 logger.info(f"Executing Okta API request with params: {params}")
+                await ctx.report_progress(25, 100)
             
             # Execute single Okta API request (no pagination)
             raw_response = await okta_client.client.list_applications(params)
@@ -105,16 +136,47 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         app_id: str = Field(..., description="The ID of the application to retrieve"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """Get detailed information about a specific Okta application."""
+        """Get detailed information about a specific Okta application.
+        
+        Returns comprehensive application details including:
+        • Basic information: name, label, status, description
+        • Sign-on configuration: mode, credentials, authentication settings
+        • User assignment settings and policies
+        • Group assignment configuration
+        • Application-specific settings and features
+        • Provisioning configuration (if applicable)
+        • Application URLs and endpoints
+        • Custom attributes and profile mappings
+        
+        Application Status Values:
+        • ACTIVE - Application is active and available to users
+        • INACTIVE - Application is disabled and not available
+        
+        Sign-On Modes:
+        • SAML_2_0 - SAML 2.0 federation
+        • OPENID_CONNECT - OpenID Connect/OAuth 2.0
+        • SECURE_PASSWORD_STORE - Password-based with secure storage
+        • AUTO_LOGIN - Automatic login with stored credentials
+        • BOOKMARK - Simple bookmark/link application
+        • BASIC_AUTH - HTTP Basic Authentication
+        • BROWSER_PLUGIN - Browser plugin required
+        • WS_FEDERATION - WS-Federation protocol
+        
+        Use this tool to get complete application configuration details for troubleshooting,
+        auditing, or configuration review purposes.
+        """
         try:
             if ctx:
-                logger.info(f"Getting detailed information for application: {app_id}")
+                logger.info(f"SERVER: Executing get_okta_application for app_id: {app_id}")
             
             # Validate input
             if not app_id or not app_id.strip():
                 raise ValueError("app_id cannot be empty")
             
             app_id = app_id.strip()
+            
+            if ctx:
+                await ctx.report_progress(25, 100)
             
             # Get the application by ID
             raw_response = await okta_client.client.get_application(app_id)
@@ -126,6 +188,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if ctx:
                 logger.info(f"Successfully retrieved application information")
+                await ctx.report_progress(100, 100)
             
             return app.as_dict()
             
@@ -152,10 +215,35 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         app_id: str = Field(..., description="The ID of the application"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List all users assigned to a specific Okta application with full pagination for complete results."""
+        """List all users assigned to a specific Okta application with full pagination.
+        
+        Returns complete list of all users assigned to the application including:
+        • User profile information (ID, email, name, status)
+        • Assignment details (scope, credentials, profile)
+        • Assignment timestamps and metadata
+        • Application-specific user attributes
+        • User status within the application context
+        
+        Assignment Types:
+        • Direct assignment - User assigned directly to application
+        • Group assignment - User assigned via group membership
+        • Rule-based assignment - User assigned via assignment rules
+        
+        User Assignment Status:
+        • PROVISIONED - User is provisioned and active in application
+        • STAGED_FOR_PROVISIONING - User staged for provisioning
+        • DEPROVISIONED - User removed from application
+        • SUSPENDED - User temporarily suspended in application
+        
+        This tool uses full pagination to return ALL assigned users, which may take longer
+        for applications with many users but ensures complete data for compliance and auditing.
+        
+        Use for application access reviews, user assignment audits, and troubleshooting
+        user access issues.
+        """
         try:
             if ctx:
-                logger.info(f"Listing users assigned to application: {app_id}")
+                logger.info(f"SERVER: Executing list_okta_application_users for app_id: {app_id}")
             
             # Validate input
             if not app_id or not app_id.strip():
@@ -168,6 +256,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if ctx:
                 logger.info(f"Executing Okta API request for application users")
+                await ctx.report_progress(20, 100)
             
             # Execute Okta API request with full pagination
             raw_response = await okta_client.client.list_application_users(app_id, params)
@@ -184,7 +273,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             while resp and resp.has_next():
                 if ctx:
                     logger.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count * 10, 100)
+                    await ctx.report_progress(min(20 + (page_count * 15), 90), 100)
                 
                 try:
                     await asyncio.sleep(0.2)  # Rate limit protection
@@ -248,10 +337,37 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         app_id: str = Field(..., description="The ID of the application"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List all groups assigned to a specific Okta application with full pagination for complete results."""
+        """List all groups assigned to a specific Okta application with full pagination.
+        
+        Returns complete list of all groups assigned to the application including:
+        • Group information (ID, name, description, type)
+        • Assignment details and configuration
+        • Group assignment scope and permissions
+        • Application-specific group attributes
+        • Assignment timestamps and metadata
+        
+        Group Assignment Types:
+        • Direct assignment - Group explicitly assigned to application
+        • Inherited assignment - Group assigned via policy or rule
+        
+        Group Types:
+        • OKTA_GROUP - Standard Okta group
+        • APP_GROUP - Application-imported group
+        • BUILT_IN - Built-in Okta group (Everyone, etc.)
+        
+        Assignment Scope:
+        • USER - Group assignment applies to user access
+        • GROUP - Group assignment for group-level permissions
+        
+        This tool uses full pagination to return ALL assigned groups, ensuring complete
+        visibility into group-based application access for security reviews and auditing.
+        
+        Use for application access governance, group assignment reviews, and troubleshooting
+        group-based access issues.
+        """
         try:
             if ctx:
-                logger.info(f"Listing groups assigned to application: {app_id}")
+                logger.info(f"SERVER: Executing list_okta_application_groups for app_id: {app_id}")
             
             # Validate input
             if not app_id or not app_id.strip():
@@ -264,6 +380,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if ctx:
                 logger.info(f"Executing Okta API request for application groups")
+                await ctx.report_progress(20, 100)
             
             # Execute Okta API request with full pagination
             raw_response = await okta_client.client.list_application_group_assignments(app_id, params)
@@ -280,7 +397,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
             while resp and resp.has_next():
                 if ctx:
                     logger.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count * 10, 100)
+                    await ctx.report_progress(min(20 + (page_count * 15), 90), 100)
                 
                 try:
                     await asyncio.sleep(0.2)  # Rate limit protection

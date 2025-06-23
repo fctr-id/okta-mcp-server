@@ -26,10 +26,72 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
         sort_order: str = Field(default="DESCENDING", description="Order of results (ASCENDING or DESCENDING)"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """Get Okta system log events with various filtering options. Returns comprehensive log data with full pagination for complete audit trails."""
+        """Get Okta system log events with comprehensive filtering and full pagination for complete audit trails.
+        
+        Returns detailed log events from Okta system logs including authentication, user management,
+        application access, policy changes, and administrative actions with complete audit information.
+        
+        Time Parameters:
+        • since - Start time in ISO 8601 format: "2024-06-01T00:00:00.000Z"
+        • until - End time in ISO 8601 format: "2024-06-23T23:59:59.999Z"
+        • Use datetime tools to generate proper timestamps: parse_relative_time("24 hours ago")
+        
+        Filter Parameter:
+        Uses Okta expression language for precise event filtering:
+        • eventType eq "user.authentication.auth" - Authentication events
+        • eventType eq "user.lifecycle.create" - User creation events
+        • eventType eq "user.lifecycle.activate" - User activation events
+        • eventType eq "user.lifecycle.suspend" - User suspension events
+        • eventType eq "application.lifecycle.create" - App creation events
+        • outcome.result eq "SUCCESS" - Successful events only
+        • outcome.result eq "FAILURE" - Failed events only
+        • actor.id eq "user_id" - Events by specific user
+        • target.id eq "target_id" - Events targeting specific resource
+        
+        Common Event Types:
+        • user.authentication.auth - User login attempts
+        • user.authentication.sso - SSO authentication
+        • user.session.start - Session initiation
+        • user.session.end - Session termination
+        • user.lifecycle.create - User creation
+        • user.lifecycle.activate - User activation
+        • user.lifecycle.suspend - User suspension
+        • user.lifecycle.unsuspend - User reactivation
+        • user.lifecycle.deactivate - User deactivation
+        • application.user_membership.add - App assignment
+        • application.user_membership.remove - App removal
+        • group.user_membership.add - Group membership addition
+        • group.user_membership.remove - Group membership removal
+        • policy.lifecycle.create - Policy creation
+        • policy.lifecycle.update - Policy modification
+        
+        Search Parameter:
+        Free-text search across event data:
+        • Search for usernames, email addresses, application names
+        • Search for IP addresses, client information
+        • Search for error messages or specific text in events
+        
+        Sort Order:
+        • DESCENDING - Most recent events first (default)
+        • ASCENDING - Oldest events first
+        
+        Example Filters:
+        • Authentication failures: 'eventType eq "user.authentication.auth" and outcome.result eq "FAILURE"'
+        • User lifecycle changes: 'eventType sw "user.lifecycle"'
+        • Application events: 'eventType sw "application"'
+        • Admin actions: 'actor.type eq "User" and eventType sw "policy"'
+        • Specific user activity: 'actor.alternateId eq "user@company.com"'
+        
+        This tool uses full pagination to return complete audit trails for compliance,
+        security analysis, and forensic investigation purposes.
+        
+        Use for security monitoring, compliance auditing, troubleshooting authentication
+        issues, and comprehensive log analysis.
+        """
         try:
             if ctx:
-                logger.info(f"Getting logs with parameters: since={since}, until={until}, filter={filter_string}, q={q}")
+                logger.info(f"SERVER: Executing get_okta_event_logs with parameters: since={since}, until={until}, filter={filter_string}, q={q}")
+                await ctx.report_progress(10, 100)
             
             # Prepare request parameters
             params = {'limit': 500}
@@ -54,6 +116,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if ctx:
                 logger.info(f"Executing Okta API request with params: {params}")
+                await ctx.report_progress(25, 100)
             
             # Execute Okta API request with full pagination
             raw_response = await okta_client.client.get_logs(params)
@@ -71,7 +134,7 @@ def register_log_events_tools(server: FastMCP, okta_client: OktaMcpClient):
             while resp and hasattr(resp, 'has_next') and resp.has_next():
                 if ctx:
                     logger.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count * 10, min(page_count * 10 + 10, 100))
+                    await ctx.report_progress(min(25 + (page_count * 10), 90), 100)
                 
                 try:
                     next_logs, next_err = await resp.next()

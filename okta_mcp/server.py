@@ -1,111 +1,92 @@
-"""Main MCP server implementation for Okta."""
-import os
+"""Main MCP server implementation for Okta using FastMCP 2.8.1."""
+
 import logging
-from typing import List
-from fastmcp import FastMCP, Context
-from fastmcp.client.sampling import RequestContext, SamplingMessage, SamplingParams
+from fastmcp import FastMCP
 
-logger = logging.getLogger("okta_mcp")
-
-async def sampling_handler(
-    messages: List[SamplingMessage],
-    params: SamplingParams,
-    ctx: RequestContext,
-) -> str:
-    """Handle sampling requests using configured AI model."""
-    
-    try:
-        from okta_mcp.utils.model_provider import get_model
-        
-        model = get_model()
-        system_instruction = params.systemPrompt or "You are a helpful assistant"
-        
-        payload = [{"role": "system", "content": system_instruction}]
-        for m in messages:
-            if m.content.type == "text":
-                payload.append({"role": "user", "content": m.content.text})
-        
-        response = model.chat.completions.create(
-            messages=payload,
-            model="gpt-4o-mini",
-            max_tokens=getattr(params, 'maxTokens', 150)
-        )
-        
-        return response.choices[0].message.content
-        
-    except Exception as e:
-        logger.error(f"Sampling error: {e}")
-        return f"AI processing failed: {str(e)}"
+logger = logging.getLogger("okta_mcp") 
 
 def create_server():
-    """Create and configure the MCP server."""
+    """Create and configure the Okta MCP server using FastMCP 2.8.1."""
     try:
-        # Create server with sampling handler
-        mcp = FastMCP("Okta MCP Server")
-        
-        # Register sampling handler (try different methods)
-        if hasattr(mcp, 'set_sampling_handler'):
-            mcp.set_sampling_handler(sampling_handler)
-        else:
-            mcp.sampling_handler = sampling_handler
-        
-        # Rest of your existing setup...
-        from okta_mcp.utils.okta_client import create_okta_client, OktaMcpClient
-        
-        logger.info("Initializing Okta client")
-        okta_client = create_okta_client(
-            org_url=os.getenv("OKTA_CLIENT_ORGURL"),
-            api_token=os.getenv("OKTA_API_TOKEN")
+        # Create server with modern FastMCP features
+        mcp = FastMCP(
+            name="Okta MCP Server",
+            instructions="""
+            This server provides Okta Identity Cloud management capabilities.
+            Use list_okta_users() to search and filter users with SCIM expressions.
+            Use get_okta_user() to retrieve detailed user information.
+            All operations require proper Okta API credentials in environment variables.
+            """,
+            # Use built-in error masking instead of custom handling
+            mask_error_details=False,  # Show detailed errors for debugging
+            # Removed stateless_http=True - it causes deprecation warning
         )
         
-        from okta_mcp.utils.request_manager import RequestManager
-        concurrent_limit = int(os.getenv("OKTA_CONCURRENT_LIMIT", "15"))
-        request_manager = RequestManager(concurrent_limit)
+        # Initialize Okta client properly
+        from okta_mcp.utils.okta_client import OktaMcpClient, create_okta_client
+        import os
         
-        okta_mcp_client = OktaMcpClient(okta_client, request_manager=request_manager)
+        logger.info("Initializing Okta client")
         
-        from okta_mcp.tools.tool_registry import ToolRegistry
-        registry = ToolRegistry()
+        # Create the Okta SDK client first
+        org_url = os.getenv('OKTA_CLIENT_ORGURL')
+        api_token = os.getenv('OKTA_API_TOKEN')
+        okta_sdk_client = create_okta_client(org_url, api_token)
         
-        logger.info("Initializing tool registry")
-        registry.initialize_server(mcp)
+        # Now create the MCP wrapper with the SDK client
+        okta_client = OktaMcpClient(client=okta_sdk_client)
         
-        logger.info("Registering tools")
-        registry.register_all_tools(mcp, okta_mcp_client)
+        # Register tools directly - no registry needed
+        logger.info("Registering Okta tools")
+        from okta_mcp.tools.user_tools import register_user_tools
+        from okta_mcp.tools.apps_tools import register_apps_tools
+        from okta_mcp.tools.log_events_tools import register_log_events_tools
+        from okta_mcp.tools.group_tools import register_group_tools
+        from okta_mcp.tools.policy_network_tools import register_policy_tools 
+        from okta_mcp.tools.datetime_tools import register_datetime_tools
         
-        mcp.request_manager = request_manager
+        register_user_tools(mcp, okta_client)
+        register_apps_tools(mcp, okta_client)
+        register_log_events_tools(mcp, okta_client)
+        register_group_tools(mcp, okta_client)
+        register_policy_tools(mcp, okta_client) 
+        register_datetime_tools(mcp, okta_client)
         
-        logger.info("MCP server created successfully with sampling handler")
+        # Store client reference for potential cleanup
+        mcp.okta_client = okta_client
+        
+        logger.info("Okta MCP server created successfully with all tools registered")
+        
         return mcp
     
     except Exception as e:
-        logger.error(f"Error creating MCP server: {e}")
+        logger.error(f"Error creating Okta MCP server: {e}")
         raise
 
-# Keep your existing run functions unchanged
 def run_with_stdio(server):
-    """Run the server with STDIO transport."""
-    logger.info("Starting server with STDIO transport")
-    server.run()
+    """Run the server with STDIO transport (secure, default)."""
+    logger.info("Starting Okta server with STDIO transport")
+    server.run()  # FastMCP defaults to STDIO
 
 def run_with_sse(server, host="0.0.0.0", port=3000, reload=False):
     """Run the server with SSE transport (deprecated)."""
-    logger.warning("SSE transport is deprecated, use --http instead")
-    logger.info(f"Starting server with SSE transport on {host}:{port}")
+    logger.warning("SSE transport is deprecated in FastMCP 2.8.1, use --http instead")
+    logger.info(f"Starting Okta server with SSE transport on {host}:{port}")
     
-    app = server.sse_app()
-    
-    import uvicorn
-    uvicorn.run(app, host=host, port=port, reload=reload)
+    try:
+        server.run(transport="sse", host=host, port=port)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"SSE transport failed ({e}), falling back to HTTP")
+        run_with_http(server, host, port)
 
 def run_with_http(server, host="0.0.0.0", port=3000):
-    """Run the server with HTTP transport."""
-    logger.info("Starting server with HTTP transport")
+    """Run the server with HTTP transport (modern, recommended for web)."""
+    logger.info(f"Starting Okta server with HTTP transport on {host}:{port}")
     
     try:
         server.run(transport="streamable-http", host=host, port=port)
-    except TypeError:
-        logger.warning("FastMCP doesn't accept host/port, using defaults")
+    except TypeError as e:
+        logger.warning(f"Host/port not supported in this FastMCP version: {e}")
         server.run(transport="streamable-http")
 
 if __name__ == "__main__":

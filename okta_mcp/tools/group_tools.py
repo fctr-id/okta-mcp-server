@@ -19,19 +19,78 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
     @server.tool()
     async def list_okta_groups(
         query: str = Field(default="", description="Simple text search matched against group name"),
-        search: str = Field(default="", description="SCIM filter syntax like - profile.name eq \"Engineering\""),
+        search: str = Field(default="", description="SCIM filter syntax - see docstring for complete syntax"),
         filter_type: str = Field(default="", description="Filter type (type, status, etc.)"),
         max_results: int = Field(default=50, description="Maximum groups to return (1-100). Limited for LLM context window."),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta groups with filtering - limited to 50 groups by default for context efficiency. Use search filters like 'profile.name co \"Engineering\"' to find specific groups."""
+        """List Okta groups with filtering - limited to 50 groups by default for context efficiency.
+        
+        IMPORTANT LIMITATIONS:
+        Limited to 50 groups by default (max 100) to stay within LLM context limits.
+        Use search filters to find specific groups rather than browsing all groups.
+        
+        Search Parameters (priority order):
+        1. search - SCIM filter syntax (recommended for precise filtering)
+        2. query - Simple text search against group name
+        3. filter_type - Basic type/status filtering
+        
+        SCIM Filter Syntax (search parameter):
+        Uses SCIM filter expressions for precise group filtering.
+        
+        Supported Operators:
+        • eq (equals), ne (not equals), gt (greater than), lt (less than)
+        • ge (greater than or equal), le (less than or equal)
+        • sw (starts with), co (contains), pr (present)
+        • and (logical AND), or (logical OR)
+        
+        Common Group Profile Fields:
+        • profile.name - Group name
+        • profile.description - Group description
+        • type - Group type (OKTA_GROUP, BUILT_IN, etc.)
+        • created, lastUpdated, lastMembershipUpdated
+        • Custom profile attributes
+        
+        Example SCIM Filters:
+        • Engineering groups: 'profile.name co "Engineering"'
+        • Groups starting with Admin: 'profile.name sw "Admin"'
+        • Multiple departments: 'profile.name co "Engineering" or profile.name co "Sales"'
+        • Built-in groups: 'type eq "BUILT_IN"'
+        • Groups with descriptions: 'profile.description pr'
+        • Recent groups: 'created gt "2024-01-01T00:00:00.000Z"'
+        
+        Query Parameter:
+        Simple text search that matches against group name.
+        Use when you want broad matching without specific SCIM syntax.
+        
+        Filter Type Parameter:
+        Basic filtering for type or status. Examples: 'type eq "OKTA_GROUP"'
+        
+        Group Types:
+        • OKTA_GROUP - Standard Okta groups
+        • BUILT_IN - System built-in groups (Everyone, etc.)
+        • APP_GROUP - Application-specific groups
+        
+        Common Use Cases:
+        • Find department or team groups
+        • Audit security and admin groups
+        • Locate application-specific groups
+        • Review group membership structures
+        • Compliance and access reviews
+        """
         try:
+            logger.info("SERVER: Executing list_okta_groups")
+            if ctx:
+                await ctx.info("Executing list_okta_groups")
+                await ctx.report_progress(10, 100)
+                
             # Validate max_results parameter
             if max_results < 1 or max_results > 100:
                 raise ValueError("max_results must be between 1 and 100")
             
             if ctx:
-                logger.info(f"Listing groups with query={query}, search={search}, max_results={max_results}")
+                await ctx.info(f"Listing groups with query={query}, search={search}, max_results={max_results}")
+                await ctx.report_progress(30, 100)
             
             # Prepare request parameters
             params = {'limit': min(max_results, 100)}
@@ -46,7 +105,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['filter'] = filter_type
             
             if ctx:
-                logger.info(f"Executing Okta API request with params: {params}")
+                await ctx.info(f"Executing Okta API request with params: {params}")
+                await ctx.report_progress(50, 100)
             
             # Execute single Okta API request (no pagination)
             raw_response = await okta_client.client.list_groups(params)
@@ -54,13 +114,18 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if err:
                 logger.error(f"Error listing groups: {err}")
+                if ctx:
+                    await ctx.error(f"Error listing groups: {err}")
                 return handle_okta_result(err, "list_groups")
+            
+            if ctx:
+                await ctx.report_progress(80, 100)
             
             # Get groups up to max_results limit
             all_groups = groups[:max_results] if groups else []
             
             if ctx:
-                logger.info(f"Retrieved {len(all_groups)} groups (limited to {max_results})")
+                await ctx.info(f"Retrieved {len(all_groups)} groups (limited to {max_results})")
                 await ctx.report_progress(100, 100)
             
             # Determine if there are more results available
@@ -72,7 +137,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 "summary": {
                     "returned_count": len(all_groups),
                     "max_requested": max_results,
-                    "context_limited": True
+                    "context_limited": True,
+                    "has_more": has_more
                 }
             }
             
@@ -107,6 +173,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception("Error in list_groups tool")
+            if ctx:
+                await ctx.error(f"Error in list_groups tool: {str(e)}")
             return handle_okta_result(e, "list_groups")
     
     @server.tool()
@@ -114,10 +182,39 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         group_id: str = Field(..., description="The ID of the group to retrieve"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """Get detailed information about a specific Okta group."""
+        """Get detailed information about a specific Okta group.
+        
+        Returns comprehensive group information including:
+        • Group profile (name, description, custom attributes)
+        • Group type and classification
+        • Membership statistics
+        • Creation and modification timestamps
+        • Group settings and configuration
+        
+        Group Information Includes:
+        • Basic details (ID, name, description)
+        • Group type (OKTA_GROUP, BUILT_IN, APP_GROUP)
+        • Profile attributes and custom fields
+        • Administrative metadata
+        • Object class and schema information
+        
+        Group Types:
+        • OKTA_GROUP - Standard organizational groups
+        • BUILT_IN - System groups like "Everyone"
+        • APP_GROUP - Application-specific groups
+        
+        Common Use Cases:
+        • Verify group configuration
+        • Audit group settings and metadata
+        • Get group details for membership operations
+        • Compliance and access reviews
+        • Troubleshoot group-related issues
+        """
         try:
+            logger.info("SERVER: Executing get_okta_group")
             if ctx:
-                logger.info(f"Getting group info for: {group_id}")
+                await ctx.info("Executing get_okta_group")
+                await ctx.report_progress(10, 100)
             
             # Validate input
             if not group_id or not group_id.strip():
@@ -125,16 +222,23 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             group_id = group_id.strip()
             
+            if ctx:
+                await ctx.info(f"Getting group info for: {group_id}")
+                await ctx.report_progress(50, 100)
+            
             # Execute API call
             raw_response = await okta_client.client.get_group(group_id)
             group, resp, err = normalize_okta_response(raw_response)
             
             if err:
                 logger.error(f"Error getting group {group_id}: {err}")
+                if ctx:
+                    await ctx.error(f"Error getting group {group_id}: {err}")
                 return handle_okta_result(err, "get_group")
             
             if ctx:
-                logger.info(f"Successfully retrieved group data for {group_id}")
+                await ctx.info(f"Successfully retrieved group data for {group_id}")
+                await ctx.report_progress(100, 100)
             
             return group.as_dict()
             
@@ -154,6 +258,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception(f"Error in get_group tool for group_id {group_id}")
+            if ctx:
+                await ctx.error(f"Error in get_group tool for group_id {group_id}: {str(e)}")
             return handle_okta_result(e, "get_group")
     
     @server.tool()
@@ -161,10 +267,48 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
         group_id: str = Field(..., description="The ID of the group to list users for"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List all users in a specific Okta group with full pagination for complete results."""
+        """List all users in a specific Okta group with full pagination for complete results.
+        
+        Returns complete group membership including:
+        • All users currently in the group
+        • User profile information
+        • Membership timestamps and details
+        • User status and account information
+        
+        Pagination Handling:
+        This tool automatically handles pagination to return ALL users in the group,
+        not just the first page. For large groups, this ensures complete membership visibility.
+        
+        User Information Includes:
+        • Basic user profile (name, email, username)
+        • User status (ACTIVE, SUSPENDED, etc.)
+        • User ID for further operations
+        • Profile attributes relevant to group membership
+        
+        Group Membership Details:
+        • Current active memberships only
+        • No historical membership data
+        • Real-time membership status
+        • Direct group membership (not inherited)
+        
+        Performance Considerations:
+        • Large groups may take longer to process
+        • Automatic rate limiting to prevent API throttling
+        • Progress reporting for long-running operations
+        • Graceful handling of pagination errors
+        
+        Common Use Cases:
+        • Complete group membership audit
+        • User access reviews and compliance
+        • Group cleanup and optimization
+        • Security group verification
+        • Bulk user operations on group members
+        """
         try:
+            logger.info("SERVER: Executing list_okta_group_users")
             if ctx:
-                logger.info(f"Listing users in group: {group_id}")
+                await ctx.info("Executing list_okta_group_users")
+                await ctx.report_progress(10, 100)
             
             # Validate input
             if not group_id or not group_id.strip():
@@ -172,11 +316,16 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             group_id = group_id.strip()
             
+            if ctx:
+                await ctx.info(f"Listing users in group: {group_id}")
+                await ctx.report_progress(30, 100)
+            
             # Prepare request parameters
             params = {'limit': 200}
             
             if ctx:
-                logger.info(f"Fetching users for group ID: {group_id}")
+                await ctx.info(f"Fetching users for group ID: {group_id}")
+                await ctx.report_progress(40, 100)
                 
             # Execute Okta API request with full pagination
             raw_response = await okta_client.client.list_group_users(group_id, params)
@@ -184,6 +333,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if err:
                 logger.error(f"Error listing users for group {group_id}: {err}")
+                if ctx:
+                    await ctx.error(f"Error listing users for group {group_id}: {err}")
                 return handle_okta_result(err, "list_group_users")
             
             # Apply full pagination for complete results
@@ -192,8 +343,8 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             while resp and resp.has_next():
                 if ctx:
-                    logger.info(f"Retrieving page {page_count + 1}...")
-                    await ctx.report_progress(page_count * 10, 100)
+                    await ctx.info(f"Retrieving page {page_count + 1}...")
+                    await ctx.report_progress(min(50 + (page_count * 5), 90), 100)
                 
                 try:
                     await asyncio.sleep(0.2)  # Rate limit protection
@@ -201,7 +352,7 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                     
                     if err:
                         if ctx:
-                            logger.error(f"Error during pagination: {err}")
+                            await ctx.error(f"Error during pagination: {err}")
                         break
                     
                     if users_page:
@@ -211,18 +362,18 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                         # Safety check
                         if page_count > 50:
                             if ctx:
-                                logger.warning("Reached maximum page limit (50), stopping")
+                                await ctx.warning("Reached maximum page limit (50), stopping")
                             break
                     else:
                         break
                         
                 except Exception as pagination_error:
                     if ctx:
-                        logger.error(f"Pagination error: {pagination_error}")
+                        await ctx.error(f"Pagination error: {pagination_error}")
                     break
             
             if ctx:
-                logger.info(f"Retrieved {len(all_users)} total users in {page_count} pages")
+                await ctx.info(f"Retrieved {len(all_users)} total users in {page_count} pages")
                 await ctx.report_progress(100, 100)
             
             return {
@@ -250,4 +401,6 @@ def register_group_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception(f"Error in list_group_users tool for group_id {group_id}")
+            if ctx:
+                await ctx.error(f"Error in list_group_users tool for group_id {group_id}: {str(e)}")
             return handle_okta_result(e, "list_group_users")
