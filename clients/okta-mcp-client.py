@@ -1,6 +1,6 @@
 """
 Unified MCP Client for Okta MCP Server
-Supports multiple transports with AI integration via Pydantic-AI
+Supports multiple transports 
 """
 
 import os
