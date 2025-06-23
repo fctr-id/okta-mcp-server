@@ -41,10 +41,54 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         policy_id: str = Field(..., description="The ID of the policy to list rules for"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List all rules for a specific Okta policy. Returns complete rule details including conditions, actions, and network zone constraints."""
+        """List all rules for a specific Okta policy.
+        
+        Returns complete rule information including:
+        • Rule conditions and criteria
+        • Authentication requirements and methods
+        • Network zone constraints and locations
+        • User and group assignments
+        • Actions and behaviors
+        • Priority and status settings
+        
+        Policy Rule Information:
+        • Rule names and descriptions
+        • Activation status (ACTIVE, INACTIVE)
+        • Priority ordering within policy
+        • Condition logic and expressions
+        • Actions taken when rule matches
+        
+        Common Rule Types:
+        • Authentication policies (MFA requirements)
+        • Authorization policies (access controls)
+        • Password policies (complexity rules)
+        • Sign-on policies (SSO behaviors)
+        
+        Rule Conditions Include:
+        • Network zones and IP ranges
+        • User and group memberships
+        • Application context
+        • Device and platform requirements
+        • Risk and context factors
+        
+        Actions and Behaviors:
+        • MFA factor requirements
+        • Session management
+        • Access grants/denials
+        • Redirections and workflows
+        
+        Common Use Cases:
+        • Policy rule audit and review
+        • Security compliance assessment
+        • Troubleshoot access issues
+        • Rule optimization and cleanup
+        • Access control verification
+        """
         try:
+            logger.info("SERVER: Executing list_okta_policy_rules")
             if ctx:
-                logger.info(f"Listing rules for policy: {policy_id}")
+                await ctx.info("Executing list_okta_policy_rules")
+                await ctx.report_progress(10, 100)
             
             # Validate input
             if not policy_id or not policy_id.strip():
@@ -52,11 +96,16 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             policy_id = policy_id.strip()
             
+            if ctx:
+                await ctx.info(f"Listing rules for policy: {policy_id}")
+                await ctx.report_progress(30, 100)
+            
             # Prepare request parameters
             params = {'limit': 50}
             
             if ctx:
-                logger.info(f"Executing Okta API request with params: {params}")
+                await ctx.info(f"Executing Okta API request with params: {params}")
+                await ctx.report_progress(50, 100)
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_policy_rules(policy_id, params)
@@ -64,10 +113,12 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if err:
                 logger.error(f"Error listing rules for policy {policy_id}: {err}")
+                if ctx:
+                    await ctx.error(f"Error listing rules for policy {policy_id}: {err}")
                 return handle_okta_result(err, "list_policy_rules")
             
             if ctx:
-                logger.info(f"Retrieved {len(rules) if rules else 0} policy rules")
+                await ctx.info(f"Retrieved {len(rules) if rules else 0} policy rules")
                 await ctx.report_progress(100, 100)
             
             return {
@@ -92,6 +143,8 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception(f"Error in list_policy_rules tool for policy_id {policy_id}")
+            if ctx:
+                await ctx.error(f"Error in list_policy_rules tool for policy_id {policy_id}: {str(e)}")
             return handle_okta_result(e, "list_policy_rules")
         
     @server.tool()
@@ -100,10 +153,59 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         rule_id: str = Field(..., description="The ID of the specific rule to retrieve"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """Get detailed information about a specific Okta policy rule including authentication methods, constraints, and network zone details."""
+        """Get detailed information about a specific Okta policy rule.
+        
+        Returns comprehensive rule configuration including:
+        • Authentication methods and requirements
+        • Network zone constraints and IP restrictions
+        • User and group targeting conditions
+        • Device and platform requirements
+        • Session management behaviors
+        • Risk assessment criteria
+        
+        Rule Details Include:
+        • Rule identification (ID, name, description)
+        • Activation status and priority
+        • Condition expressions and logic
+        • Action specifications and behaviors
+        • Administrative metadata
+        
+        Authentication Rule Information:
+        • Required MFA factors and methods
+        • Factor sequencing and fallbacks
+        • Enrollment requirements
+        • Verification policies
+        
+        Network Zone Constraints:
+        • Allowed/blocked IP ranges
+        • Geographic restrictions
+        • Proxy and VPN handling
+        • Dynamic zone evaluation
+        
+        Access Control Actions:
+        • Grant/deny decisions
+        • Step-up authentication triggers
+        • Session duration and management
+        • Redirect behaviors
+        
+        Risk and Context Factors:
+        • Device trust requirements
+        • Location-based rules
+        • Behavioral analysis integration
+        • Threat intelligence inputs
+        
+        Common Use Cases:
+        • Detailed rule configuration review
+        • Security policy troubleshooting
+        • Compliance audit requirements
+        • Rule modification planning
+        • Access control verification
+        """
         try:
+            logger.info("SERVER: Executing get_okta_policy_rule")
             if ctx:
-                logger.info(f"Getting rule {rule_id} for policy: {policy_id}")
+                await ctx.info("Executing get_okta_policy_rule")
+                await ctx.report_progress(10, 100)
             
             # Validate inputs
             if not policy_id or not policy_id.strip():
@@ -113,6 +215,10 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             policy_id = policy_id.strip()
             rule_id = rule_id.strip()
+            
+            if ctx:
+                await ctx.info(f"Getting rule {rule_id} for policy: {policy_id}")
+                await ctx.report_progress(30, 100)
             
             # Get the Okta organization URL and API token
             org_url = os.getenv('OKTA_CLIENT_ORGURL')
@@ -138,7 +244,8 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             url = f"{org_url}/api/v1/policies/{policy_id}/rules/{rule_id}"
             
             if ctx:
-                logger.info(f"Making direct API call to: {url}")
+                await ctx.info(f"Making direct API call to: {url}")
+                await ctx.report_progress(60, 100)
             
             response = await make_async_request(
                 method="GET",
@@ -148,7 +255,8 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             )
             
             if ctx:
-                logger.info(f"Successfully retrieved rule information using direct API call")
+                await ctx.info(f"Successfully retrieved rule information using direct API call")
+                await ctx.report_progress(100, 100)
             
             return response
             
@@ -168,6 +276,8 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception(f"Error in get_policy_rule tool for policy_id {policy_id}, rule_id {rule_id}")
+            if ctx:
+                await ctx.error(f"Error in get_policy_rule tool for policy_id {policy_id}, rule_id {rule_id}: {str(e)}")
             return handle_okta_result(e, "get_policy_rule")    
         
     @server.tool()
@@ -175,10 +285,67 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
         filter_type: str = Field(default="", description="Filter zones by type (IP, DYNAMIC) or status (ACTIVE, INACTIVE)"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List all network zones defined in the Okta organization including IP ranges, proxy details, and zone status."""
+        """List all network zones defined in the Okta organization.
+        
+        Returns comprehensive network zone information including:
+        • IP ranges and CIDR blocks
+        • Dynamic zone definitions and criteria
+        • Proxy configurations and settings
+        • Zone status and activation state
+        • Administrative metadata
+        
+        Network Zone Types:
+        • IP - Static IP address ranges and CIDR blocks
+        • DYNAMIC - Dynamic zones based on location or other criteria
+        • BLOCKLIST - IP ranges to block or restrict
+        • POLICY - Policy-specific network constraints
+        
+        Zone Information Includes:
+        • Zone identification (ID, name, type)
+        • IP address ranges and gateway lists
+        • Proxy and ASN configurations
+        • Geographic location data
+        • Usage and application assignments
+        
+        IP Zone Details:
+        • Static IP ranges (CIDR notation)
+        • Gateway IP addresses
+        • Proxy IP configurations
+        • ASN (Autonomous System Number) lists
+        
+        Dynamic Zone Criteria:
+        • Geographic locations and countries
+        • ISP and carrier information
+        • Risk assessment factors
+        • Behavioral analysis inputs
+        
+        Zone Status Information:
+        • ACTIVE - Currently enforced zones
+        • INACTIVE - Disabled or suspended zones
+        • Usage statistics and policy assignments
+        • Last modification timestamps
+        
+        Filtering Options:
+        • By zone type (IP, DYNAMIC, etc.)
+        • By status (ACTIVE, INACTIVE)
+        • By administrative properties
+        
+        Common Use Cases:
+        • Network security policy review
+        • IP allowlist and blocklist management
+        • Geographic access control audit
+        • Compliance and regulatory reporting
+        • Network zone optimization
+        """
         try:
+            logger.info("SERVER: Executing list_okta_network_zones")
             if ctx:
-                logger.info(f"Listing network zones with filter: {filter_type}")
+                await ctx.info("Executing list_okta_network_zones")
+                await ctx.report_progress(10, 100)
+            
+            if ctx:
+                await ctx.info(f"Listing network zones with filter: {filter_type}")
+                await ctx.report_progress(30, 100)
             
             # Prepare request parameters
             params = {'limit': 50}
@@ -187,7 +354,8 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 params['filter'] = filter_type
             
             if ctx:
-                logger.info(f"Executing Okta API request with params: {params}")
+                await ctx.info(f"Executing Okta API request with params: {params}")
+                await ctx.report_progress(50, 100)
             
             # Execute Okta API request
             raw_response = await okta_client.client.list_network_zones(params)
@@ -195,10 +363,12 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
             
             if err:
                 logger.error(f"Error listing network zones: {err}")
+                if ctx:
+                    await ctx.error(f"Error listing network zones: {err}")
                 return handle_okta_result(err, "list_network_zones")
             
             if ctx:
-                logger.info(f"Retrieved {len(zones) if zones else 0} network zones")
+                await ctx.info(f"Retrieved {len(zones) if zones else 0} network zones")
                 await ctx.report_progress(100, 100)
             
             return {
@@ -222,4 +392,6 @@ def register_policy_tools(server: FastMCP, okta_client: OktaMcpClient):
                 }
             
             logger.exception(f"Error in list_network_zones tool")
+            if ctx:
+                await ctx.error(f"Error in list_network_zones tool: {str(e)}")
             return handle_okta_result(e, "list_network_zones")
