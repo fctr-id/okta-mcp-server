@@ -1,3 +1,13 @@
+# Build STDIO variant (recommended for Claude Desktop, etc.)
+#docker build --target stdio -t okta-mcp-server:stdio .
+
+# Build HTTP variant (current standard for web applications)
+#docker build --target http -t okta-mcp-server:http .
+
+# Build SSE variant (deprecated, for legacy clients)
+#docker build --target sse -t okta-mcp-server:sse .
+
+
 FROM python:3.13-alpine AS base
 
 # Install build dependencies
@@ -25,12 +35,18 @@ RUN addgroup -g 1001 -S appgroup && \
 
 USER appuser
 
-# STDIO variant
+# STDIO variant (recommended)
 FROM base AS stdio
 ENV TRANSPORT_TYPE=stdio
 ENTRYPOINT ["python", "main.py"]
 
-# SSE variant
+# HTTP variant (current standard for web)
+FROM base AS http
+ENV TRANSPORT_TYPE=http
+EXPOSE 3000
+ENTRYPOINT ["python", "main.py", "--http", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
+
+# SSE variant (deprecated)
 FROM base AS sse
 ENV TRANSPORT_TYPE=sse
 EXPOSE 3000
