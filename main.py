@@ -1,5 +1,5 @@
 """
-Main entry point for the Okta MCP Server.
+Main entry point for the Okta MCP Server using FastMCP 2.8.1.
 Run this file to start the server.
 """
 import os
@@ -7,14 +7,6 @@ import sys
 import logging
 import argparse
 from dotenv import load_dotenv
-
-# Add this right after imports
-try:
-    import mcp.server.lowlevel.server as mcp_server
-    mcp_server.VERBOSE_LOGGING = False  # This will disable the processing request logs
-    logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
-except ImportError:
-    print("Could not import mcp server module to disable verbose logging")
 
 # Configure logging
 logging.basicConfig(
@@ -29,26 +21,28 @@ def parse_args():
     
     # Transport flags
     parser.add_argument("--http", action="store_true", 
-                      help="Use Streamable HTTP transport (modern, recommended)")
+                      help="Use HTTP transport (recommended for web)")
     parser.add_argument("--sse", action="store_true", 
-                      help="Use SSE transport (legacy, deprecated)")
+                      help="Use SSE transport (deprecated, falls back to HTTP)")
     parser.add_argument("--stdio", action="store_true", 
-                      help="Use STDIO transport (default)")
+                      help="Use STDIO transport (default, secure)")
     parser.add_argument("--iunderstandtherisks", action="store_true",
-                      help="Acknowledge security risks of using HTTP-based transports")
+                      help="Acknowledge security risks of network transports")
     
-    # HTTP/SSE configuration
-    parser.add_argument("--host", default="0.0.0.0", 
-                      help="Host to bind to for HTTP transports (default: 0.0.0.0)")
+    # HTTP configuration
+    parser.add_argument("--host", default="127.0.0.1", 
+                      help="Host to bind to for HTTP transport (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=3000, 
-                      help="Port to run on for HTTP transports (default: 3000)")
-    parser.add_argument("--reload", action="store_true", 
-                      help="Enable auto-reload for development (HTTP transports only)")
+                      help="Port for HTTP transport (default: 3000)")
     
     # General configuration
     parser.add_argument("--log-level", default="INFO", 
                       choices=["DEBUG", "INFO", "WARNING", "ERROR"], 
                       help="Set logging level (default: INFO)")
+    
+    # Authentication flags (NEW)
+    parser.add_argument("--no-auth", action="store_true",
+                      help="Disable authentication even if configured in environment")
     
     return parser.parse_args()
 
@@ -69,84 +63,57 @@ def main():
     
     if missing_vars:
         logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        logger.error("Create a .env file with the following variables:")
+        logger.error("Create a .env file with:")
         logger.error("OKTA_CLIENT_ORGURL=https://your-org.okta.com")
-        logger.error("OKTA_API_TOKEN=your-api-token")
+        logger.error("OKTA_API_TOKEN=your_api_token_here")
+        logger.error("LOG_LEVEL=INFO")
+        logger.error("OKTA_CONCURRENT_LIMIT=15")
+        logger.error("")
+        logger.error("Generate an API token in Okta: Admin > Security > API > Tokens")
+        return 1
+    
+    # Validate Okta URL format
+    okta_url = os.getenv("OKTA_CLIENT_ORGURL")
+    if not okta_url.startswith("https://"):
+        logger.error("OKTA_CLIENT_ORGURL must be in format: https://your-org.okta.com")
         return 1
     
     try:
-        # Handle transport-specific setup BEFORE importing server module
+        # Import server module
+        from okta_mcp.server import create_server, run_with_http, run_with_sse, run_with_stdio
+        
+        # Create server (now with optional auth)
+        server = create_server(enable_auth=not args.no_auth)
+        
+        # Determine transport
         if args.http:
-            # Check for risk acknowledgment
             if not args.iunderstandtherisks:
-                logger.error("HTTP transport requires explicit risk acknowledgment")
-                logger.error("Add --iunderstandtherisks flag to run with HTTP transport")
+                logger.error("HTTP transport requires --iunderstandtherisks flag")
+                logger.error("HTTP transport exposes server over network - ensure proper security")
                 return 1
             
-            # Show security warning
-            logger.warning("SECURITY WARNING: HTTP transport exposes API operations over network")
-            logger.warning("Do not use in production without proper security measures")
+            logger.warning("SECURITY: HTTP transport exposes server over network")
+            run_with_http(server, args.host, args.port)
             
-            # CRITICAL: Set sys.argv BEFORE importing FastMCP modules
-            original_argv = sys.argv.copy()
-            sys.argv = [
-                sys.argv[0],  # Keep original script name
-                '--port', str(args.port),
-                '--host', args.host,
-                '--log-level', args.log_level
-            ]
-            
-            logger.info(f"Modified sys.argv for FastMCP: {sys.argv}")
-            
-            try:
-                # Import server module AFTER setting sys.argv
-                from okta_mcp.server import create_server, run_with_streamable_http
-                
-                # Create server (FastMCP should read the modified sys.argv)
-                server = create_server()
-                
-                # Run with Streamable HTTP transport
-                logger.info("Starting with Streamable HTTP transport (recommended)")
-                run_with_streamable_http(server, args.host, args.port, args.reload)
-                
-            finally:
-                # Restore original sys.argv
-                sys.argv = original_argv
-                
         elif args.sse:
-            # Check for risk acknowledgment
             if not args.iunderstandtherisks:
-                logger.error("SSE transport requires explicit risk acknowledgment")
-                logger.error("Add --iunderstandtherisks flag to run with SSE transport")
+                logger.error("SSE transport requires --iunderstandtherisks flag")
                 return 1
             
-            # Show security warning and deprecation notice
-            logger.warning("SECURITY WARNING: SSE transport exposes API operations over HTTP")
-            logger.warning("DEPRECATION WARNING: SSE transport is deprecated, use --http instead")
-            logger.warning("Do not use in production without proper security measures")
-            
-            # Import normally for SSE (doesn't need sys.argv modification)
-            from okta_mcp.server import create_server, run_with_sse
-            
-            # Create and run server
-            server = create_server()
-            logger.info("Starting with SSE transport (deprecated)")
-            run_with_sse(server, args.host, args.port, args.reload)
+            logger.warning("SECURITY: SSE transport exposes server over network")
+            logger.warning("DEPRECATED: SSE transport is deprecated, use --http")
+            run_with_sse(server, args.host, args.port)
             
         else:
-            # Import normally for STDIO
-            from okta_mcp.server import create_server, run_with_stdio
-            
-            # Create and run server
-            server = create_server()
-            logger.info("Starting with STDIO transport (default, secure)")
+            # Default to STDIO (secure)
+            logger.info("Using STDIO transport (secure, recommended)")
             run_with_stdio(server)
         
         return 0
         
     except Exception as e:
         logger.error(f"Error starting server: {e}")
-        logger.exception(e)  # Print full exception details for debugging
+        logger.exception("Full error details:")
         return 1
 
 if __name__ == "__main__":

@@ -38,6 +38,27 @@ def get_log_directory():
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
 
+def get_logger(name: str = None) -> logging.Logger:
+    """
+    Get a logger with the specified name.
+    
+    Args:
+        name: Logger name (defaults to 'okta_mcp' if None)
+        
+    Returns:
+        Configured logger instance
+    """
+    if name is None:
+        name = "okta_mcp"
+    
+    # Get the logger - it will inherit from the root logger configuration
+    logger = logging.getLogger(name)
+    
+    # If this logger doesn't have handlers, it will use the root logger's handlers
+    # which were configured in configure_logging()
+    
+    return logger
+
 def configure_logging(log_level=None, console_level=None, suppress_mcp_logs=True):
     """
     Configure root logging for the application.
@@ -179,9 +200,9 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
     fs_logger.propagate = False
     
     # Suppress noisy MCP framework logs
-    logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
-    logging.getLogger("mcp.server").setLevel(logging.WARNING)
-    logging.getLogger("mcp.client").setLevel(logging.WARNING)
+    #logging.getLogger("mcp.server.lowlevel.server").setLevel(logging.WARNING)
+    #logging.getLogger("mcp.server").setLevel(logging.WARNING)
+    #logging.getLogger("mcp.client").setLevel(logging.WARNING)
     logging.getLogger("pydantic_ai.mcp").setLevel(logging.WARNING)
     logging.getLogger("pydantic_ai.server").setLevel(logging.WARNING)
     logging.getLogger("okta_mcp").setLevel(logging.WARNING)
