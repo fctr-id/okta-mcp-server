@@ -5,13 +5,12 @@
 </div>
 
 <div align="center">
-  <h2>Okta MCP Server (v0.3.0-ALPHA)</h2>
+  <h2>Okta MCP Server (v0.1.0-BETA)</h2>
 </div>
 
 <div align="center">
-  <h3> **🚀 NEW in v0.3.0:** **Streamable HTTP Transport Support!**</h3>
+  <h3> **🚀 NEW in v0.1.0:** **Major Architecture Upgrade with FastMCP 2.0!**</h3>
 </div>
-
 
 <div align="center">
 The Okta MCP Server is a groundbreaking tool that enables AI models to interact directly with your Okta environment using the Model Context Protocol (MCP). Built specifically for IAM engineers, security teams, and Okta administrators, it implements the MCP specification to transform how AI assistants can help manage and analyze Okta resources.
@@ -28,9 +27,40 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 </p>
 </div>
 
+## 🎉 What's New in v0.1.0-BETA - Major Architecture Transformation!
+
+This release represents a **complete architectural overhaul** with these key improvements:
+
+### 🏗️ **Core Architecture**
+- **🚀 FastMCP 2.0**: Migrated from legacy MCP package to FastMCP 2.0 for cutting-edge protocol features
+- **🧹 Cleaner Code**: Removed `tool_registry.py` dependency for simpler, more maintainable codebase
+- **⚡ Better Performance**: Modern async patterns and optimized request handling
+
+### 🛠️ **Enhanced Tools**
+- **📝 Complete Rewrite**: All tools rewritten with better annotations and descriptions for AI understanding
+- **🛡️ Improved Validation**: Enhanced error handling and input validation across all operations
+
+### 🌐 **Unified Client**
+- **🎯 Single CLI**: New unified command-line client supporting multiple transports (STDIO, HTTP)
+- **⚙️ Simplified Setup**: Streamlined configuration with intelligent defaults
+
+### 🔐 **Advanced Security**
+- **🎫 Bearer Tokens**: Full JWT bearer token support with `jwks_uri` validation
+- **🏢 Enterprise Auth**: Support for enterprise authentication flows and scope-based access
+
+### 🚀 **Future-Ready**
+- **🎯 Sampling Support**: Foundation for advanced request sampling capabilities
+- **🔌 Middleware Ready**: Extensible middleware system for custom processing
+- **📡 Protocol Evolution**: Access to latest MCP features as they're developed and standardized
 
 ## 📋 Table of Contents
 
+- [🎉 What's New in v0.1.0-BETA - Major Architecture Transformation!](#-whats-new-in-v010-beta---major-architecture-transformation)
+  - [🏗️ **Core Architecture**](#️-core-architecture)
+  - [🛠️ **Enhanced Tools**](#️-enhanced-tools)
+  - [🌐 **Unified Client**](#-unified-client)
+  - [🔐 **Advanced Security**](#-advanced-security)
+  - [🚀 **Future-Ready**](#-future-ready)
 - [📋 Table of Contents](#-table-of-contents)
 - [🔍 What is the Model Context Protocol?](#-what-is-the-model-context-protocol)
 - [⚠️ IMPORTANT: Security \& Limitations](#️-important-security--limitations)
@@ -46,15 +76,15 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
   - [Configuration \& Usage](#configuration--usage)
   - [Supported Transports and Launching](#supported-transports-and-launching)
     - [1. Standard I/O (STDIO) - Recommended](#1-standard-io-stdio---recommended)
-    - [2. Streamable HTTP Transport - Modern \& Recommended](#2-streamable-http-transport---modern--recommended)
+    - [2. Streamable HTTP Transport - Modern \& Current Standard](#2-streamable-http-transport---modern--current-standard)
     - [3. Remote HTTP Access - High Risk Advanced Use Only](#3-remote-http-access---high-risk-advanced-use-only)
-    - [4. Server-Sent Events (SSE) - Legacy](#4-server-sent-events-sse---legacy)
+    - [4. Server-Sent Events (SSE) - Deprecated](#4-server-sent-events-sse---deprecated)
 - [5. Docker Deployment](#5-docker-deployment)
       - [Running Docker Containers](#running-docker-containers)
   - [Start the SSE container with environment variables](#start-the-sse-container-with-environment-variables)
   - [Configure your MCP client to connect to http://localhost:3000/sse](#configure-your-mcp-client-to-connect-to-httplocalhost3000sse)
 - [⚠️ Good to Know](#️-good-to-know)
-  - [Alpha Release 🧪](#alpha-release-)
+  - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
   - [Current Limitations 🔍](#current-limitations-)
 - [🗺️ Roadmap](#️-roadmap)
@@ -255,12 +285,12 @@ The Okta MCP Server supports multiple transport protocols:
   ```
   *Replace `DIR` with your absolute directory path and `OKTA_API_TOKEN` with your actual token*
 
-#### 2. Streamable HTTP Transport - Modern & Recommended
+#### 2. Streamable HTTP Transport - Modern & Current Standard
 
-**NEW in v0.3.0!** Modern HTTP-based transport with advanced features:
+**Current Standard** - Modern HTTP-based transport with advanced features:
 
 - **Features**: ✅ Real-time event streaming, session management, resumability support
-- **Performance**: ✅ Better scalability and connection handling
+- **Performance**: ✅ Better scalability and connection handling  
 - **Use case**: Modern web applications and clients supporting HTTP streaming
 - **Security**: ⚠️ Local HTTP server - secure in controlled environments
 
@@ -269,7 +299,7 @@ The Okta MCP Server supports multiple transport protocols:
 # Start server with explicit risk acknowledgment
 python main.py --http --iunderstandtherisks
 
-# Server will start on http://localhost:8000/mcp
+# Server will start on http://localhost:3000/mcp
 # Connect using streamable HTTP compatible clients
 ```
 
@@ -315,7 +345,7 @@ python main.py --http --iunderstandtherisks
       "command": "npx",
       "args": [
         "mcp-remote",
-        "http://localhost:8000/mcp"
+        "http://localhost:3000/mcp"
       ],
       "env": {
         "OKTA_CLIENT_ORGURL": "https://dev-1606.okta.com",
@@ -328,7 +358,7 @@ python main.py --http --iunderstandtherisks
 
 **🚨 CRITICAL SECURITY WARNINGS:**
 - **NEVER use in production environments**
-- **NEVER expose the HTTP port (8000) to public networks**
+- **NEVER expose the HTTP port (3000) to public networks**
 - **ANYONE with network access can control your Okta tenant**
 - **No authentication or authorization protection**
 - **All Okta operations are exposed without restrictions**
@@ -341,22 +371,22 @@ python main.py --http --iunderstandtherisks
 - Development scenarios requiring HTTP debugging
 - **NEVER for production or shared environments**
 
-#### 4. Server-Sent Events (SSE) - Legacy
+#### 4. Server-Sent Events (SSE) - Deprecated
 
-**⚠️ DEPRECATED:** SSE transport is being superseded by Streamable HTTP transport.
+**⚠️ DEPRECATED:** SSE transport is deprecated and not recommended for new implementations.
 
 ```bash
 # Run in SSE mode (requires explicit risk acknowledgment)
 python main.py --sse --iunderstandtherisks
 ```
 
-- **Use case**: Legacy MCP clients requiring SSE
+- **Use case**: Legacy MCP clients that specifically require SSE (not recommended)
 - **Security**: ⚠️ Same HTTP security risks as Streamable HTTP
-- **Recommendation**: Use Streamable HTTP transport instead
+- **Recommendation**: Use Streamable HTTP transport instead for all new implementations
 
 ## 5. Docker Deployment
 
-The Okta MCP Server provides Docker images for both transport types, offering containerized deployment options.
+The Okta MCP Server provides Docker images for all transport types, offering containerized deployment options.
 
 ##### Running Docker Containers
 
@@ -371,7 +401,7 @@ For Claude Desktop or other MCP clients, configure to use the Docker container:
         "run", "-i", "--rm",
         "-e", "OKTA_CLIENT_ORGURL",
         "-e", "OKTA_API_TOKEN",
-        "fctrid/okta-mcp-server-stdio:latest"
+        "fctrid/okta-mcp-server:stdio"
       ],
       "env": {
         "OKTA_CLIENT_ORGURL": "https://your-org.okta.com",
@@ -382,47 +412,47 @@ For Claude Desktop or other MCP clients, configure to use the Docker container:
 }
 ```
 
-**Streamable HTTP Transport:**
+**Streamable HTTP Transport (Current Standard):**
 ```bash
-# Start the Streamable HTTP container
+# Start the HTTP container
 docker run -d --name okta-mcp-http \
-  -p 8000:8000 \
+  -p 3000:3000 \
   -e OKTA_API_TOKEN=your_api_token \
   -e OKTA_CLIENT_ORGURL=https://your-org.okta.com \
-  fctrid/okta-mcp-server-http:latest
+  fctrid/okta-mcp-server:http
 
-# Configure your MCP client to connect to http://localhost:8000/mcp
+# Configure your MCP client to connect to http://localhost:3000/mcp
 ```
 
-**SSE Transport (Legacy):**
-
-### Start the SSE container with environment variables
-```
+**SSE Transport (Deprecated - Not Recommended):**
+```bash
+# Start the SSE container (deprecated)
 docker run -d --name okta-mcp-sse \
   -p 3000:3000 \
   -e OKTA_API_TOKEN=your_api_token \
   -e OKTA_CLIENT_ORGURL=https://your-org.okta.com \
-  fctrid/okta-mcp-server-sse:latest
+  fctrid/okta-mcp-server:sse
+
+# Configure your MCP client to connect to http://localhost:3000/sse
 ```
 
-### Configure your MCP client to connect to http://localhost:3000/sse
-
-> ⚠️ **Important Security Notes for Docker HTTP Transports:**
-> - HTTP transports in Docker expose unauthenticated HTTP endpoints with full Okta access
-> - **Never expose HTTP ports to the public internet**
-> - Use only in secure, controlled network environments
-> - Claude Desktop and many other MCP clients **do not support HTTP transports natively**
-> - Consider using container orchestration platforms with proper network policies for production use
+**Building Images Locally:**
+```bash
+# Build all variants
+docker build --target stdio -t okta-mcp-server:stdio .
+docker build --target http -t okta-mcp-server:http .
+docker build --target sse -t okta-mcp-server:sse .
+```
 
 
 ## ⚠️ Good to Know
 
-### Alpha Release 🧪
-* Early development phase - expect frequent updates
-* API surface coverage is still expanding
-* Currently focusing on read-only operations for users and groups
-* More tools and capabilities being added rapidly
-* Not yet suitable for production environments
+### Beta Release 🧪
+* Completely rewritten architecture with FastMCP 2.0
+* Enhanced stability and performance compared to previous alpha releases
+* Comprehensive tool system with improved AI integration
+* More suitable for development and testing environments
+* Production readiness being evaluated with enhanced security features
 
 ### Security First 🛡️
 * Designed for least-privilege operation
@@ -438,16 +468,20 @@ docker run -d --name okta-mcp-sse \
 
 ## 🗺️ Roadmap
 
-**v0.3.0 - Current (NEW!)**
+**v0.1.0-BETA - Current (MAJOR ARCHITECTURAL OVERHAUL!)**
+- [x] Complete migration to FastMCP 2.0 architecture
+- [x] Comprehensive rewrite of all tools with enhanced annotations
+- [x] New unified CLI client supporting multiple transports
+- [x] Eliminated tool_registry.py dependency for cleaner codebase
+- [x] Advanced bearer token support with jwks_uri validation
+- [x] Significantly enhanced error handling and validation
+- [x] Performance optimizations and modern async patterns
+
+**v0.3.0 - Previous**
 - [x] Streamable HTTP transport support
 - [x] Real-time event streaming
 - [x] Session management and resumability
 - [x] Enhanced client applications
-
-**v0.2.0 - Previous**
-- [x] MCP protocol compliance
-- [x] Basic Okta API integration
-- [x] Read-only operations support
 
 **Future plans include:**
 - [ ] Complete user lifecycle operations
