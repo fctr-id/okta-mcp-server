@@ -1,0 +1,34 @@
+# Smithery configuration file: https://smithery.ai/docs/build/project-config
+
+startCommand:
+  type: stdio
+  commandFunction:
+    # A JS function that produces the CLI command based on the given config to start the MCP on stdio.
+    |-
+    (config) => ({ command: 'python', args: [ 'main.py', ...(config.noAuth ? ['--no-auth'] : []), ...(config.logLevel ? ['--log-level', config.logLevel] : []) ], env: { OKTA_CLIENT_ORGURL: config.oktaClientOrgurl, OKTA_API_TOKEN: config.oktaApiToken } })
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - oktaClientOrgurl
+      - oktaApiToken
+    properties:
+      oktaClientOrgurl:
+        type: string
+        description: The Okta Org URL, e.g., https://dev-123.okta.com
+      oktaApiToken:
+        type: string
+        description: The Okta API token with read permissions
+      noAuth:
+        type: boolean
+        default: false
+        description: Disable authentication even if configured in environment
+      logLevel:
+        type: string
+        default: INFO
+        description: Logging level for the server
+  exampleConfig:
+    oktaClientOrgurl: https://dev-123456.okta.com
+    oktaApiToken: 00aBcDeFGhIjkLmNoPqRsTuVwxYz
+    noAuth: false
+    logLevel: INFO
