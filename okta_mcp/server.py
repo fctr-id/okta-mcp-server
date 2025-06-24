@@ -1,13 +1,72 @@
 """Main MCP server implementation for Okta using FastMCP 2.8.1."""
 
+import os
 import logging
 from fastmcp import FastMCP
 
 logger = logging.getLogger("okta_mcp") 
 
-def create_server():
+def create_auth_provider():
+    """Create authentication provider if configured."""
+    try:
+        # Check if authentication is enabled
+        enable_auth = os.getenv('ENABLE_AUTH', 'false').lower() == 'true'
+        if not enable_auth:
+            return None
+            
+        from fastmcp.server.auth import BearerAuthProvider
+        
+        # Get auth configuration
+        public_key = os.getenv('AUTH_PUBLIC_KEY')
+        jwks_uri = os.getenv('AUTH_JWKS_URI')
+        issuer = os.getenv('AUTH_ISSUER')
+        audience = os.getenv('AUTH_AUDIENCE', 'okta-mcp-server')
+        required_scopes_str = os.getenv('AUTH_REQUIRED_SCOPES', '')
+        
+        # Parse required scopes
+        required_scopes = [scope.strip() for scope in required_scopes_str.split(',') if scope.strip()] if required_scopes_str else None
+        
+        # Validate configuration
+        if not public_key and not jwks_uri:
+            logger.warning("Authentication enabled but no AUTH_PUBLIC_KEY or AUTH_JWKS_URI provided. Skipping auth.")
+            return None
+            
+        if public_key and jwks_uri:
+            logger.warning("Both AUTH_PUBLIC_KEY and AUTH_JWKS_URI provided. Using JWKS_URI.")
+            public_key = None
+        
+        # Create auth provider
+        auth_provider = BearerAuthProvider(
+            public_key=public_key,
+            jwks_uri=jwks_uri,
+            issuer=issuer,
+            audience=audience,
+            required_scopes=required_scopes
+        )
+        
+        logger.info(f"Authentication enabled with {'JWKS' if jwks_uri else 'static key'}")
+        if issuer:
+            logger.info(f"Required issuer: {issuer}")
+        if audience:
+            logger.info(f"Required audience: {audience}")
+        if required_scopes:
+            logger.info(f"Required scopes: {required_scopes}")
+            
+        return auth_provider
+        
+    except ImportError:
+        logger.error("Authentication dependencies not available. Install with: pip install 'fastmcp[auth]'")
+        return None
+    except Exception as e:
+        logger.error(f"Error creating auth provider: {e}")
+        return None
+
+def create_server(enable_auth: bool = True):
     """Create and configure the Okta MCP server using FastMCP 2.8.1."""
     try:
+        # Create auth provider if enabled
+        auth_provider = create_auth_provider() if enable_auth else None
+        
         # Create server with modern FastMCP features
         mcp = FastMCP(
             name="Okta MCP Server",
@@ -19,7 +78,7 @@ def create_server():
             """,
             # Use built-in error masking instead of custom handling
             mask_error_details=False,  # Show detailed errors for debugging
-            # Removed stateless_http=True - it causes deprecation warning
+            auth=auth_provider  # Add authentication if configured
         )
         
         # Initialize Okta client properly
@@ -55,7 +114,8 @@ def create_server():
         # Store client reference for potential cleanup
         mcp.okta_client = okta_client
         
-        logger.info("Okta MCP server created successfully with all tools registered")
+        auth_status = "with authentication" if auth_provider else "without authentication"
+        logger.info(f"Okta MCP server created successfully {auth_status} with all tools registered")
         
         return mcp
     

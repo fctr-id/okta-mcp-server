@@ -40,6 +40,10 @@ def parse_args():
                       choices=["DEBUG", "INFO", "WARNING", "ERROR"], 
                       help="Set logging level (default: INFO)")
     
+    # Authentication flags (NEW)
+    parser.add_argument("--no-auth", action="store_true",
+                      help="Disable authentication even if configured in environment")
+    
     return parser.parse_args()
 
 def main():
@@ -78,8 +82,8 @@ def main():
         # Import server module
         from okta_mcp.server import create_server, run_with_http, run_with_sse, run_with_stdio
         
-        # Create server
-        server = create_server()
+        # Create server (now with optional auth)
+        server = create_server(enable_auth=not args.no_auth)
         
         # Determine transport
         if args.http:
