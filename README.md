@@ -6,6 +6,7 @@
 
 <div align="center">
   <h2>Okta MCP Server (v0.1.0-BETA)</h2>
+  <a href="https://smithery.ai/server/@fctr-id/okta-mcp-server"><img alt="Smithery Badge" src="https://smithery.ai/badge/@fctr-id/okta-mcp-server"></a>
 </div>
 
 <div align="center">
@@ -191,6 +192,14 @@ The Okta MCP Server currently provides the following tools:
 > Additional tools for applications, factors, policies, and more advanced operations are on the roadmap and will be added in future releases.
 
 ## 🚀 Quick Start
+
+### Installing via Smithery
+
+To install Okta MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@fctr-id/okta-mcp-server):
+
+```bash
+npx -y @smithery/cli install @fctr-id/okta-mcp-server --client claude
+```
 
 ### Prerequisites
 
