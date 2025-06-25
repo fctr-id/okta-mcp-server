@@ -6,8 +6,6 @@
 
 <div align="center">
   <h2>Okta MCP Server (v0.1.0-BETA)</h2>
-  <a href="https://smithery.ai/server/@fctr-id/okta-mcp-server"><img alt="Smithery Badge" src="https://smithery.ai/badge/@fctr-id/okta-mcp-server"></a>
-</div>
 
 <div align="center">
   <h3> **🚀 NEW in v0.1.0:** **Major Architecture Upgrade with FastMCP 2.0!**</h3>
