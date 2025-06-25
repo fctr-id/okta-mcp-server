@@ -6,6 +6,7 @@
 
 <div align="center">
   <h2>Okta MCP Server (v0.1.0-BETA)</h2>
+</div>
 
 <div align="center">
   <h3> **🚀 NEW in v0.1.0:** **Major Architecture Upgrade with FastMCP 2.0!**</h3>
@@ -80,8 +81,6 @@ This release represents a **complete architectural overhaul** with these key imp
     - [4. Server-Sent Events (SSE) - Deprecated](#4-server-sent-events-sse---deprecated)
 - [5. Docker Deployment](#5-docker-deployment)
       - [Running Docker Containers](#running-docker-containers)
-  - [Start the SSE container with environment variables](#start-the-sse-container-with-environment-variables)
-  - [Configure your MCP client to connect to http://localhost:3000/sse](#configure-your-mcp-client-to-connect-to-httplocalhost3000sse)
 - [⚠️ Good to Know](#️-good-to-know)
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
@@ -190,14 +189,6 @@ The Okta MCP Server currently provides the following tools:
 > Additional tools for applications, factors, policies, and more advanced operations are on the roadmap and will be added in future releases.
 
 ## 🚀 Quick Start
-
-### Installing via Smithery
-
-To install Okta MCP Server for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@fctr-id/okta-mcp-server):
-
-```bash
-npx -y @smithery/cli install @fctr-id/okta-mcp-server --client claude
-```
 
 ### Prerequisites
 
