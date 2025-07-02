@@ -163,12 +163,33 @@ class OAuthFastMCPProxy:
         self.app.router.add_get("/", self.home)
         self.app.router.add_get("/health", self.health_check)
         
+        # OAuth discovery endpoints (RFC 8414) with CORS support
+        self.app.router.add_route('*', '/.well-known/oauth-protected-resource', self.oauth_protected_resource_metadata)
+        self.app.router.add_route('*', '/.well-known/oauth-authorization-server', self.oauth_authorization_server_metadata)
+        self.app.router.add_route('*', '/.well-known/jwks.json', self.oauth_jwks_proxy)
+        
         # OAuth routes
         self.app.router.add_get('/oauth/permissions', self.permissions_info)
         self.app.router.add_get('/oauth/login', self.oauth_login)
         self.app.router.add_get('/oauth/callback', self.oauth_callback)
         self.app.router.add_get('/oauth/status', self.oauth_status)
         self.app.router.add_get('/oauth/logout', self.oauth_logout)
+        
+        # Dynamic Client Registration endpoint (for MCP Inspector etc.)
+        self.app.router.add_post('/oauth2/v1/clients', self.oauth_register_client)
+        self.app.router.add_options('/oauth2/v1/clients', self.oauth_register_client)
+        
+        # Authorization endpoint proxy (maps virtual client IDs to real client ID)
+        self.app.router.add_get('/oauth2/v1/authorize', self.oauth_authorize_proxy)
+        
+        # Token endpoint proxy (maps virtual client IDs to real client ID)
+        self.app.router.add_post('/oauth2/v1/token', self.oauth_token_proxy)
+        self.app.router.add_options('/oauth2/v1/token', self.oauth_token_proxy)
+        
+        # OAuth endpoints for virtual clients (maps to real Okta endpoints)
+        self.app.router.add_get('/oauth/authorize', self.oauth_authorize_virtual)
+        self.app.router.add_post('/oauth/token', self.oauth_token_virtual)
+        self.app.router.add_get('/oauth/userinfo', self.oauth_userinfo_virtual)
         
     def _setup_mcp_routes(self):
         """Setup MCP proxy routes with OAuth protection"""
@@ -226,11 +247,23 @@ class OAuthFastMCPProxy:
         
     async def health_check(self, request: web.Request) -> web.Response:
         """Health check endpoint"""
+        base_url = f"{request.scheme}://{request.host}"
+        
         return web.json_response({
             "status": "healthy",
             "oauth_configured": bool(self.config.client_id),
             "mcp_backend": self.backend_server_path,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
+            "oauth_discovery": {
+                "protected_resource": f"{base_url}/.well-known/oauth-protected-resource",
+                "authorization_server": f"{base_url}/.well-known/oauth-authorization-server", 
+                "jwks": f"{base_url}/.well-known/jwks.json"
+            },
+            "mcp_endpoints": {
+                "tools": f"{base_url}/mcp/tools",
+                "resources": f"{base_url}/mcp/resources",
+                "prompts": f"{base_url}/mcp/prompts"
+            }
         })
         
     async def oauth_login(self, request: web.Request) -> web.Response:
@@ -299,6 +332,47 @@ class OAuthFastMCPProxy:
     async def oauth_callback(self, request: web.Request) -> web.Response:
         """Handle OAuth callback with PKCE"""
         try:
+            # Check if this is a proxied callback for MCP Inspector
+            received_state = request.query.get("state")
+            logger.info(f"Callback received with state: {received_state}")
+            logger.info(f"State store contents: {list(self.state_store.keys())}")
+            
+            if received_state and received_state in self.state_store:
+                stored_data = self.state_store[received_state]
+                original_redirect_uri = stored_data.get('original_redirect_uri')
+                original_state = stored_data.get('original_state')
+                
+                logger.info(f"Found stored data for state {received_state}: {stored_data}")
+                
+                if original_redirect_uri and '127.0.0.1:6274' in original_redirect_uri:
+                    # This is a proxied callback, forward to MCP Inspector
+                    logger.info(f"Proxying callback to MCP Inspector: {original_redirect_uri}")
+                    
+                    # Build query parameters for MCP Inspector
+                    callback_params = dict(request.query)
+                    
+                    # If original request had no state, don't include it in callback
+                    if original_state is None:
+                        callback_params.pop('state', None)
+                        logger.info("Removing state parameter for MCP Inspector (original had no state)")
+                    else:
+                        callback_params['state'] = original_state
+                        logger.info(f"Using original state for MCP Inspector: {original_state}")
+                    
+                    # Forward to MCP Inspector
+                    from urllib.parse import urlencode
+                    query_string = urlencode(callback_params)
+                    final_redirect = f"{original_redirect_uri}?{query_string}"
+                    
+                    logger.info(f"Final redirect URL: {final_redirect}")
+                    
+                    # Clean up state store
+                    del self.state_store[received_state]
+                    
+                    return web.Response(status=302, headers={'Location': final_redirect})
+            
+            logger.info("Processing as regular OAuth callback for web interface")
+            # Regular OAuth callback handling for web interface
             from aiohttp_session import get_session
             session = await get_session(request)
             
@@ -818,6 +892,176 @@ class OAuthFastMCPProxy:
         
         return web.Response(text=html, content_type='text/html')
 
+    # OAuth Discovery Endpoints (RFC 8414)
+    
+    async def oauth_protected_resource_metadata(self, request: web.Request) -> web.Response:
+        """OAuth 2.0 Protected Resource Metadata (RFC 9728)"""
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, mcp-protocol-version"
+                }
+            )
+        
+        try:
+            base_url = f"{request.scheme}://{request.host}"
+            
+            metadata = {
+                "resource": base_url,
+                "authorization_servers": [base_url],  # Point to our proxy, not Okta directly
+                "scopes_supported": self.config.get_all_scopes(),
+                "bearer_methods_supported": ["header"],
+                "resource_documentation": f"{base_url}/docs",
+                "mcp_protocol_version": "2025-06-18",
+                "resource_type": "mcp-server"
+            }
+            
+            logger.info("Serving OAuth protected resource metadata")
+            response = web.json_response(metadata)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error serving protected resource metadata: {e}")
+            response = web.json_response(
+                {"error": "Failed to retrieve protected resource metadata"}, 
+                status=503
+            )
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+    
+    async def oauth_authorization_server_metadata(self, request: web.Request) -> web.Response:
+        """OAuth 2.0 Authorization Server Metadata (RFC 8414)"""
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, mcp-protocol-version"
+                }
+            )
+        
+        try:
+            # Try Okta's OpenID Connect discovery endpoint first (most common)
+            metadata_urls = [
+                f"{self.config.org_url}/.well-known/openid-configuration"
+            ]
+            
+            okta_metadata = None
+            for metadata_url in metadata_urls:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(metadata_url, timeout=10.0)
+                        if response.status_code == 200:
+                            okta_metadata = response.json()
+                            logger.info(f"Successfully fetched Okta metadata from {metadata_url}")
+                            break
+                        else:
+                            logger.debug(f"Failed to fetch from {metadata_url}: HTTP {response.status_code}")
+                except Exception as e:
+                    logger.debug(f"Failed to fetch from {metadata_url}: {e}")
+                    continue
+            
+            if okta_metadata:
+                # Replace key endpoints with our proxy endpoints where we have proxies
+                base_url = f"{request.scheme}://{request.host}"
+                okta_metadata["authorization_endpoint"] = f"{base_url}/oauth2/v1/authorize"
+                okta_metadata["token_endpoint"] = f"{base_url}/oauth2/v1/token"
+                okta_metadata["registration_endpoint"] = f"{base_url}/oauth2/v1/clients"
+                
+                # Return Okta's metadata with our proxy endpoints
+                response = web.json_response(okta_metadata)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return response
+            else:
+                raise Exception("All metadata URLs failed")
+            
+        except Exception as e:
+            logger.error(f"Error fetching Okta metadata: {e}")
+            # Fallback metadata with our proxy endpoints where available
+            base_url = f"{request.scheme}://{request.host}"
+            fallback_metadata = {
+                "issuer": self.config.org_url,
+                "authorization_endpoint": f"{base_url}/oauth2/v1/authorize",
+                "token_endpoint": f"{base_url}/oauth2/v1/token", 
+                "userinfo_endpoint": f"{self.config.org_url}/oauth2/v1/userinfo",
+                "registration_endpoint": f"{base_url}/oauth2/v1/clients",
+                "jwks_uri": f"{self.config.org_url}/oauth2/v1/keys",
+                "scopes_supported": self.config.get_all_scopes() + ["openid", "profile", "email"],
+                "response_types_supported": ["code", "token"],
+                "grant_types_supported": ["authorization_code", "client_credentials"],
+                "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+                "code_challenge_methods_supported": ["S256"],
+                "subject_types_supported": ["public"],
+                "id_token_signing_alg_values_supported": ["RS256"]
+            }
+            
+            logger.warning("Using fallback authorization server metadata")
+            response = web.json_response(fallback_metadata)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+    
+    async def oauth_jwks_proxy(self, request: web.Request) -> web.Response:
+        """Proxy to Okta's JWKS endpoint with caching"""
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "GET, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                }
+            )
+        
+        try:
+            # Simple in-memory cache (in production, use Redis or similar)
+            cache_key = "okta_jwks"
+            cache_ttl = 300  # 5 minutes
+            now = datetime.now(timezone.utc)
+            
+            # Check if we have cached JWKS
+            if hasattr(self, '_jwks_cache'):
+                cached_time, cached_data = self._jwks_cache.get(cache_key, (None, None))
+                if cached_time and (now - cached_time).total_seconds() < cache_ttl:
+                    logger.debug("Serving cached JWKS")
+                    response = web.json_response(cached_data)
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                    return response
+            
+            # Fetch fresh JWKS from Okta
+            jwks_url = f"{self.config.org_url}/oauth2/v1/keys"
+            
+            async with httpx.AsyncClient() as client:
+                jwks_response = await client.get(jwks_url, timeout=10.0)
+                jwks_response.raise_for_status()
+                jwks_data = jwks_response.json()
+            
+            # Cache the result
+            if not hasattr(self, '_jwks_cache'):
+                self._jwks_cache = {}
+            self._jwks_cache[cache_key] = (now, jwks_data)
+            
+            logger.info(f"Serving fresh JWKS with {len(jwks_data.get('keys', []))} keys")
+            response = web.json_response(jwks_data)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error fetching JWKS from Okta: {e}")
+            response = web.json_response(
+                {"error": "Failed to retrieve JWKS"}, 
+                status=503
+            )
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return response
+    
     async def run(self, host: str = "localhost", port: int = 3001):
         """Run the OAuth FastMCP proxy server"""
         try:
@@ -868,43 +1112,398 @@ class OAuthFastMCPProxy:
             self._audit_log("request_error", details={"error": str(e), "path": request.path})
             raise
 
-def main():
-    """Main entry point"""
+    async def oauth_register_client(self, request: web.Request) -> web.Response:
+        """Handle Dynamic Client Registration (DCR) - RFC 7591"""
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                }
+            )
+        
+        try:
+            # Get registration request
+            registration_data = await request.json()
+            logger.info(f"Client registration request: {registration_data}")
+            
+            # For MCP Inspector and similar tools, we can use our static client
+            # but return a "virtual" registration that points to our proxy endpoints
+            
+            client_name = registration_data.get("client_name", "Unknown MCP Client")
+            redirect_uris = registration_data.get("redirect_uris", [])
+            scopes = registration_data.get("scope", "")
+            token_endpoint_auth_method = registration_data.get("token_endpoint_auth_method", "none")
+            
+            # Validate redirect URIs (basic security check)
+            valid_redirect_uris = []
+            for uri in redirect_uris:
+                if uri.startswith(("http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1")):
+                    valid_redirect_uris.append(uri)
+                else:
+                    logger.warning(f"Rejecting non-localhost redirect URI: {uri}")
+            
+            if not valid_redirect_uris:
+                return web.json_response(
+                    {"error": "invalid_redirect_uri", "error_description": "Only localhost redirect URIs are allowed"},
+                    status=400,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            # Create a virtual client ID (for mapping to real client)
+            client_id = f"virtual-{hashlib.sha256(client_name.encode()).hexdigest()}"
+            
+            # Register the client (in production, store in database)
+            self.sessions[client_id] = {
+                "client_name": client_name,
+                "redirect_uris": valid_redirect_uris,
+                "scopes": scopes.split(),
+                "registered_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.info(f"Registered virtual client: {client_id} - {client_name}")
+            
+            # Respond with registered client information
+            response_data = {
+                "client_id": client_id,
+                "client_name": client_name,
+                "redirect_uris": valid_redirect_uris,
+                "scopes": scopes.split(),
+                "grant_types": registration_data.get("grant_types", ["authorization_code"]),
+                "response_types": registration_data.get("response_types", ["code"]),
+                "token_endpoint_auth_method": token_endpoint_auth_method,
+                "client_id_issued_at": int(datetime.now(timezone.utc).timestamp()),
+                "registration_access_token": "dummy-access-token",
+                "registration_client_uri": f"{request.scheme}://{request.host}/oauth2/v1/clients/{client_id}"
+            }
+            
+            return web.json_response(
+                response_data, 
+                status=201,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+            
+        except Exception as e:
+            logger.error(f"Client registration failed: {e}")
+            return web.json_response(
+                {"error": str(e)}, 
+                status=500,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+
+    async def oauth_authorize_virtual(self, request: web.Request) -> web.Response:
+        """Handle OAuth authorization for virtual clients"""
+        try:
+            # Get client_id from request
+            client_id = request.query.get('client_id')
+            redirect_uri = request.query.get('redirect_uri')
+            state = request.query.get('state')
+            scope = request.query.get('scope')
+            
+            # Check if this is a virtual client
+            if hasattr(self, '_virtual_clients') and client_id in self._virtual_clients:
+                virtual_client = self._virtual_clients[client_id]
+                
+                # Validate redirect URI
+                if redirect_uri not in virtual_client['redirect_uris']:
+                    return web.Response(
+                        text=f"Invalid redirect URI: {redirect_uri}",
+                        status=400
+                    )
+                
+                logger.info(f"Virtual client {client_id} authorization request")
+                
+                # Redirect to our normal OAuth login flow, but store virtual client info
+                from aiohttp_session import get_session
+                session = await get_session(request)
+                session['virtual_client_id'] = client_id
+                session['virtual_redirect_uri'] = redirect_uri
+                session['virtual_state'] = state
+                session['virtual_scope'] = scope
+                
+                # Redirect to our OAuth login
+                return web.Response(
+                    status=302,
+                    headers={'Location': '/oauth/login'}
+                )
+            else:
+                return web.Response(
+                    text=f"Unknown client_id: {client_id}",
+                    status=400
+                )
+                
+        except Exception as e:
+            logger.error(f"Virtual OAuth authorize error: {e}")
+            return web.Response(text="Authorization failed", status=500)
+    
+    async def oauth_token_virtual(self, request: web.Request) -> web.Response:
+        """Handle OAuth token exchange for virtual clients"""
+        try:
+            # Handle CORS
+            if request.method == "OPTIONS":
+                return web.Response(
+                    status=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "POST, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                    }
+                )
+            
+            # For now, return an error since this requires more complex implementation
+            # The client should use the main OAuth flow through /oauth/login
+            return web.json_response(
+                {
+                    "error": "unsupported_grant_type",
+                    "error_description": "Please use the web-based OAuth flow at /oauth/login"
+                },
+                status=400,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+            
+        except Exception as e:
+            logger.error(f"Virtual OAuth token error: {e}")
+            return web.json_response(
+                {"error": "server_error", "error_description": str(e)},
+                status=500,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+    
+    async def oauth_userinfo_virtual(self, request: web.Request) -> web.Response:
+        """Handle OAuth userinfo for virtual clients"""
+        try:
+            # Handle CORS
+            if request.method == "OPTIONS":
+                return web.Response(
+                    status=200,
+                    headers={
+                        "Access-Control-Allow-Origin": "*",
+                        "Access-Control-Allow-Methods": "GET, OPTIONS",
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                    }
+                )
+            
+            # For now, return an error since this requires authentication
+            return web.json_response(
+                {
+                    "error": "unauthorized",
+                    "error_description": "Please use the web-based OAuth flow at /oauth/login"
+                },
+                status=401,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+            
+        except Exception as e:
+            logger.error(f"Virtual OAuth userinfo error: {e}")
+            return web.json_response(
+                {"error": "server_error", "error_description": str(e)},
+                status=500,
+                headers={"Access-Control-Allow-Origin": "*"}            )
+    
+    async def oauth_authorize_proxy(self, request: web.Request) -> web.Response:
+        """Proxy OAuth authorization requests, mapping virtual client IDs to real client ID"""
+        try:
+            client_id = request.query.get('client_id')
+            if not client_id:
+                return web.Response(text="Missing client_id parameter", status=400)
+            
+            if client_id.startswith('virtual-'):
+                if client_id not in self.sessions:
+                    return web.Response(text=f"Unknown virtual client: {client_id}", status=400)
+                
+                logger.info(f"Mapping virtual client {client_id} to real Okta client")
+                
+                # Get original parameters
+                original_redirect_uri = request.query.get('redirect_uri')
+                original_state = request.query.get('state')
+                
+                logger.info(f"Original redirect_uri: {original_redirect_uri}")
+                logger.info(f"Original state: {original_state}")
+                
+                # Generate a state parameter if none provided (required for Okta)
+                if not original_state:
+                    import secrets
+                    proxy_state = secrets.token_urlsafe(32)
+                    logger.info(f"Generated proxy state: {proxy_state}")
+                else:
+                    proxy_state = original_state
+                
+                # Store mapping for callback (use proxy state as key)
+                self.state_store[proxy_state] = {
+                    'virtual_client_id': client_id,
+                    'original_redirect_uri': original_redirect_uri,
+                    'original_state': original_state,  # Store original state (could be None)
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+                logger.info(f"Stored state mapping: {proxy_state} -> {self.state_store[proxy_state]}")
+                
+                # Build new query parameters
+                new_query_params = dict(request.query)
+                new_query_params['client_id'] = self.config.client_id
+                new_query_params['state'] = proxy_state  # Use proxy state
+                
+                # Use our configured redirect URI instead
+                proxy_redirect_uri = f"{request.scheme}://{request.host}/oauth/callback"
+                new_query_params['redirect_uri'] = proxy_redirect_uri
+                
+                from urllib.parse import urlencode
+                query_string = urlencode(new_query_params)
+                okta_auth_url = f"https://{self.config.okta_domain}/oauth2/v1/authorize?{query_string}"
+                
+                logger.info(f"Redirecting to Okta: {okta_auth_url}")
+                return web.Response(status=302, headers={'Location': okta_auth_url})
+            else:
+                query_string = str(request.query_string, 'utf-8')
+                okta_auth_url = f"https://{self.config.okta_domain}/oauth2/v1/authorize?{query_string}"
+                return web.Response(status=302, headers={'Location': okta_auth_url})
+                
+        except Exception as e:
+            logger.error(f"Authorization proxy error: {e}")
+            return web.Response(text=f"Authorization failed: {str(e)}", status=500)
+    
+    async def oauth_token_proxy(self, request: web.Request) -> web.Response:
+        """Proxy OAuth token requests, handling virtual client authentication"""
+        # Handle CORS preflight
+        if request.method == "OPTIONS":
+            return web.Response(
+                status=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type, Authorization, mcp-protocol-version"
+                }
+            )
+        
+        try:
+            # Get the request body
+            if request.content_type == 'application/json':
+                token_data = await request.json()
+            else:
+                # Form data
+                token_data = dict(await request.post())
+            
+            client_id = token_data.get('client_id')
+            logger.info(f"Token request for client_id: {client_id}")
+            
+            if not client_id:
+                return web.json_response(
+                    {"error": "invalid_request", "error_description": "Missing client_id"},
+                    status=400,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            
+            # Check if this is a virtual client
+            if client_id.startswith('virtual-'):
+                if client_id not in self.sessions:
+                    return web.json_response(
+                        {"error": "invalid_client", "error_description": "Unknown virtual client"},
+                        status=400,
+                        headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                
+                logger.info(f"Token request for virtual client {client_id}, mapping to real client {self.config.client_id}")
+                
+                # Log original request data for debugging
+                logger.info(f"Original token request data: {token_data}")
+                
+                # Replace virtual client ID with real client ID
+                token_data['client_id'] = self.config.client_id
+                
+                # Replace redirect_uri with our proxy URI (must match authorization request)
+                if 'redirect_uri' in token_data:
+                    original_redirect_uri = token_data['redirect_uri']
+                    proxy_redirect_uri = f"{request.scheme}://{request.host}/oauth/callback"
+                    token_data['redirect_uri'] = proxy_redirect_uri
+                    logger.info(f"Mapped redirect_uri: {original_redirect_uri} -> {proxy_redirect_uri}")
+                
+                # Add client secret if required (for confidential clients)
+                if hasattr(self.config, 'client_secret') and self.config.client_secret:
+                    token_data['client_secret'] = self.config.client_secret
+                
+                logger.info(f"Final token request data to Okta: {token_data}")
+            
+            # Forward to Okta token endpoint
+            async with httpx.AsyncClient() as client:
+                okta_token_url = f"https://{self.config.okta_domain}/oauth2/v1/token"
+                
+                if request.content_type == 'application/json':
+                    response = await client.post(
+                        okta_token_url,
+                        json=token_data,
+                        headers={'Content-Type': 'application/json'}
+                    )
+                else:
+                    response = await client.post(
+                        okta_token_url,
+                        data=token_data,
+                        headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                    )
+                
+                logger.info(f"Okta token response status: {response.status_code}")
+                
+                if response.status_code >= 400:
+                    logger.error(f"Okta token error response: {response.text}")
+                
+                # Return Okta's response with CORS headers
+                try:
+                    response_data = response.json()
+                except:
+                    response_data = {"error": "invalid_response", "error_description": response.text}
+                
+                return web.json_response(
+                    response_data,
+                    status=response.status_code,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+                
+        except Exception as e:
+            logger.error(f"Token proxy error: {e}")
+            import traceback
+            traceback.print_exc()
+            return web.json_response(
+                {"error": "server_error", "error_description": str(e)},
+                status=500,
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
+
+if __name__ == "__main__":
     import argparse
+    import sys
     
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    
-    parser = argparse.ArgumentParser(description="OAuth FastMCP Proxy Server")
-    parser.add_argument("--backend", default="./main.py", help="Backend MCP server path")
+    parser = argparse.ArgumentParser(description="OAuth MCP Proxy Server")
+    parser.add_argument("--backend", required=True, help="Path to the MCP server backend script")
     parser.add_argument("--host", default="localhost", help="Host to bind to")
     parser.add_argument("--port", type=int, default=3001, help="Port to bind to")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
     
     args = parser.parse_args()
     
-    async def run_server():
-        proxy = OAuthFastMCPProxy(args.backend)
-        runner = await proxy.run(args.host, args.port)
-        
-        try:
-            # Keep server running
-            await asyncio.Event().wait()
-        except KeyboardInterrupt:
-            logger.info("Shutting down server...")
-        finally:
-            await runner.cleanup()
+    # Set up logging
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
+    logger = logging.getLogger(__name__)
     
     try:
-        asyncio.run(run_server())
+        # Create proxy instance
+        proxy = OAuthFastMCPProxy(args.backend)
+        
+        # Start the server
+        logger.info(f"Starting OAuth MCP Proxy on {args.host}:{args.port}")
+        logger.info(f"Backend MCP server: {args.backend}")
+        
+        web.run_app(proxy.app, host=args.host, port=args.port)
+        
     except KeyboardInterrupt:
         logger.info("Server stopped by user")
+        sys.exit(0)
     except Exception as e:
-        logger.error(f"Server failed: {e}")
-        exit(1)
-
-
-if __name__ == "__main__":
-    main()
+        logger.error(f"Failed to start server: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
