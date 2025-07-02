@@ -1,9 +1,0 @@
-{
-  "redirect_uris": ["http://127.0.0.1:6274/oauth/callback/debug"],
-  "token_endpoint_auth_method": "none",
-  "grant_types": ["authorization_code", "refresh_token"],
-  "response_types": ["code"],
-  "client_name": "MCP Inspector",
-  "client_uri": "https://github.com/modelcontextprotocol/inspector",
-  "scope": "openid profile email okta.users.read okta.groups.read okta.apps.read okta.events.read okta.logs.read okta.policies.read okta.devices.read okta.factors.read"
-}

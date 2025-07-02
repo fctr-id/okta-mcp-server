@@ -6,7 +6,7 @@ This guide explains how to configure Claude Desktop to connect to your OAuth-pro
 
 ## Prerequisites
 
-1. **OAuth Proxy Server Running**: Your `okta_oauth_fastmcp_proxy.py` should be running on `http://localhost:3001`
+1. **OAuth Proxy Server Running**: Your `oauth_proxy.py` should be running on `http://localhost:3001`
 2. **Node.js Installed**: Required for the npx command
 3. **Claude Desktop**: Latest version installed
 
@@ -16,7 +16,7 @@ Make sure your OAuth proxy server is running:
 
 ```bash
 cd C:\Users\Dharanidhar\Desktop\github-repos\okta-mcp-server
-python okta_oauth_fastmcp_proxy.py
+python oauth_proxy.py
 ```
 
 You should see:
@@ -175,7 +175,7 @@ The MCP server requests these permissions:
 
 ### 1. "Connection refused" 
 - **Cause**: OAuth proxy server not running
-- **Solution**: Start `python okta_oauth_fastmcp_proxy.py`
+- **Solution**: Start `python oauth_proxy.py`
 
 ### 2. "401 Unauthorized"
 - **Cause**: Not authenticated or session expired
@@ -200,7 +200,7 @@ If you need to run on a different port:
 
 1. **Update OAuth proxy startup**:
 ```bash
-python okta_oauth_fastmcp_proxy.py --port 3002
+python oauth_proxy.py --port 3002
 ```
 
 2. **Update Claude Desktop config**:

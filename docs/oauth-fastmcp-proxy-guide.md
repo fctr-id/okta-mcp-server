@@ -55,7 +55,7 @@ export OAUTH_REDIRECT_URI="http://localhost:3001/oauth/callback"
 ### 3. Run the Proxy Server
 
 ```bash
-python okta_oauth_fastmcp_proxy.py --backend ./main.py --port 3001
+python oauth_proxy.py --backend ./main.py --port 3001
 ```
 
 ### 4. Test the Implementation
@@ -242,7 +242,7 @@ export PYTHONPATH="."
 python -c "
 import logging
 logging.basicConfig(level=logging.DEBUG)
-from okta_oauth_fastmcp_proxy import main
+from oauth_proxy import main
 main()
 "
 ```

@@ -42,7 +42,7 @@ from aiohttp_session.cookie_storage import EncryptedCookieStorage
 # Import our custom OAuth configuration
 from okta_mcp.auth.oauth_provider import OAuthConfig
 
-logger = logging.getLogger("okta_oauth_fastmcp_proxy")
+logger = logging.getLogger("oauth_proxy")
 
 class OAuthFastMCPProxy:
     """OAuth-protected FastMCP proxy server"""
