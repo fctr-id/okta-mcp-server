@@ -52,3 +52,9 @@ FROM base AS sse
 ENV TRANSPORT_TYPE=sse
 EXPOSE 3000
 ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
+
+# OAuth Proxy variant (for remote deployment with OAuth protection)
+FROM base AS oauth-proxy
+ENV TRANSPORT_TYPE=oauth-proxy
+EXPOSE 3001
+ENTRYPOINT ["python", "okta_mcp/oauth_proxy/server.py", "--backend=main.py", "--host=0.0.0.0", "--port=3001"]
