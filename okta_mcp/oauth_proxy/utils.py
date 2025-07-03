@@ -33,19 +33,17 @@ def create_user_bound_session_key(user_id: str, session_id: str) -> str:
 def create_401_response(request: web.Request, error_description: str) -> web.Response:
     """
     Create RFC 6750 compliant 401 response with WWW-Authenticate header
+    
+    As per RFC 6750, the WWW-Authenticate header should include resource_metadata
+    pointing to the protected resource metadata endpoint.
     """
     # Get the base URL for the resource metadata
     scheme = request.scheme
     host = request.host
     base_url = f"{scheme}://{host}"
     
-    # RFC 6750 compliant WWW-Authenticate header
-    www_authenticate = (
-        f'Bearer realm="{base_url}", '
-        f'error="invalid_token", '
-        f'error_description="{error_description}", '
-        f'resource="{base_url}/.well-known/oauth-protected-resource"'
-    )
+    # RFC 6750 compliant WWW-Authenticate header - simplified per spec
+    www_authenticate = f'Bearer resource_metadata="{base_url}/.well-known/oauth-protected-resource"'
     
     return web.json_response(
         {
@@ -54,7 +52,14 @@ def create_401_response(request: web.Request, error_description: str) -> web.Res
             "resource_metadata": f"{base_url}/.well-known/oauth-protected-resource"
         },
         status=401,
-        headers={'WWW-Authenticate': www_authenticate}
+        headers={
+            'WWW-Authenticate': www_authenticate,
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY", 
+            "X-XSS-Protection": "1; mode=block",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Access-Control-Allow-Origin": "*"
+        }
     )
 
 

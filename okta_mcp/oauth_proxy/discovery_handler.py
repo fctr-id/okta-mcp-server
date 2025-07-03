@@ -48,7 +48,7 @@ class DiscoveryHandler:
                 "resource_type": "mcp-server"
             }
             
-            logger.info("Serving OAuth protected resource metadata")
+            logger.debug("Serving OAuth protected resource metadata")
             response = web.json_response(metadata)
             response.headers["Access-Control-Allow-Origin"] = "*"
             return response
@@ -88,7 +88,7 @@ class DiscoveryHandler:
                         response = await client.get(metadata_url, timeout=10.0)
                         if response.status_code == 200:
                             okta_metadata = response.json()
-                            logger.info(f"Successfully fetched Okta metadata from {metadata_url}")
+                            logger.debug(f"Successfully fetched Okta metadata from {metadata_url}")
                             break
                         else:
                             logger.debug(f"Failed to fetch from {metadata_url}: HTTP {response.status_code}")

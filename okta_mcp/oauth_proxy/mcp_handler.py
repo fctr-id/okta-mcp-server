@@ -24,12 +24,12 @@ class MCPHandler:
         """Handle POST requests to root endpoint (required for Claude Desktop/MCP CLI)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required for MCP requests")
+            return create_401_response(request, "Authentication required for MCP requests")
             
         try:
             # This is likely an MCP protocol request from Claude Desktop or MCP CLI
             # Forward it to the underlying MCP proxy server
-            logger.info(f"POST / request from {user_info.get('email', 'unknown')} - forwarding to MCP server")
+            logger.debug(f"POST / request from {user_info.get('email', 'unknown')} - forwarding to MCP server")
             
             # Get the request body
             request_data = await request.json()
@@ -79,7 +79,7 @@ class MCPHandler:
         """List MCP tools (OAuth protected)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required to access MCP tools")
+            return create_401_response(request, "Authentication required to access MCP tools")
             
         try:
             # Get tools from FastMCP proxy
@@ -106,7 +106,7 @@ class MCPHandler:
         """Call MCP tool (OAuth protected)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required to call MCP tools")
+            return create_401_response(request, "Authentication required to call MCP tools")
             
         try:
             data = await request.json()
@@ -128,7 +128,7 @@ class MCPHandler:
                 "virtual_client_id": user_info.get("virtual_client_id")
             })
             
-            logger.info(f"Tool '{tool_name}' called by {user_info.get('email', 'unknown')}")
+            logger.debug(f"Tool '{tool_name}' called by {user_info.get('email', 'unknown')}")
             
             return web.json_response({
                 "result": result,
@@ -148,7 +148,7 @@ class MCPHandler:
         """List MCP resources (OAuth protected)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required to access MCP resources")
+            return create_401_response(request, "Authentication required to access MCP resources")
             
         try:
             # Get resources from FastMCP proxy
@@ -175,7 +175,7 @@ class MCPHandler:
         """Read MCP resource (OAuth protected)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required to read MCP resources")
+            return create_401_response(request, "Authentication required to read MCP resources")
             
         try:
             data = await request.json()
@@ -210,7 +210,7 @@ class MCPHandler:
         """List MCP prompts (OAuth protected)"""
         user_info = await self.auth_handler.get_user_from_request(request)
         if not user_info:
-            return self._create_401_response(request, "Authentication required to access MCP prompts")
+            return create_401_response(request, "Authentication required to access MCP prompts")
             
         try:
             # Get prompts from FastMCP proxy
@@ -279,7 +279,7 @@ class MCPHandler:
                 "ip": request.remote
             })
             
-            logger.info(f"Tool '{tool_name}' called from {request.remote} (public access)")
+            logger.debug(f"Tool '{tool_name}' called from {request.remote} (public access)")
             
             return web.json_response({
                 "result": result,
@@ -313,20 +313,4 @@ class MCPHandler:
             logger.error(f"Failed to list resources (public): {e}")
             return web.json_response({"error": str(e)}, status=500)
 
-    def _create_401_response(self, request: web.Request, error_description: str) -> web.Response:
-        """Create RFC 6750 compliant 401 response with WWW-Authenticate header"""
-        resource_metadata_url = f"{request.scheme}://{request.host}/.well-known/oauth-protected-resource"
-        www_authenticate = f'Bearer realm="Okta MCP Server", resource_metadata="{resource_metadata_url}"'
-        
-        return web.json_response(
-            {"error": "invalid_token", "error_description": error_description},
-            status=401,
-            headers={
-                "WWW-Authenticate": www_authenticate,
-                "X-Content-Type-Options": "nosniff",
-                "X-Frame-Options": "DENY", 
-                "X-XSS-Protection": "1; mode=block",
-                "Referrer-Policy": "strict-origin-when-cross-origin",
-                "Access-Control-Allow-Origin": "*"
-            }
-        )
+

@@ -177,8 +177,8 @@ class AuthHandler:
                 'user_agent': request.headers.get("User-Agent", "")
             }
             
-            logger.info(f"Storing in session - State: {state}, Code verifier length: {len(code_verifier)}")
-            logger.info(f"Backup store now has {len(self.state_store)} entries")
+            logger.debug(f"Storing in session - State: {state}, Code verifier length: {len(code_verifier)}")
+            logger.debug(f"Backup store now has {len(self.state_store)} entries")
             
             # Use configured redirect URI or fallback to request-based construction
             redirect_uri = self.config.redirect_uri or str(request.url.with_path("/oauth/callback"))
@@ -198,11 +198,11 @@ class AuthHandler:
             # Add audience parameter if configured (CRITICAL for JWT audience validation)
             if self.config.audience:
                 auth_params["audience"] = self.config.audience
-                logger.info(f"Including audience in authorization request: {self.config.audience}")
+                logger.debug(f"Including audience in authorization request: {self.config.audience}")
             
             auth_url = f"{self.config.authorization_url}?{urlencode(auth_params)}"
             
-            logger.info(f"Initiating OAuth flow with PKCE. State: {state}")
+            logger.debug(f"Initiating OAuth flow with PKCE. State: {state}")
             
             # Create response with redirect
             response = web.Response(status=302, headers={"Location": auth_url})
@@ -224,19 +224,19 @@ class AuthHandler:
         try:
             # Check if this is a proxied callback for MCP Inspector
             received_state = request.query.get("state")
-            logger.info(f"Callback received with state: {received_state}")
-            logger.info(f"State store contents: {list(self.state_store.keys())}")
+            logger.debug(f"Callback received with state: {received_state}")
+            logger.debug(f"State store contents: {list(self.state_store.keys())}")
             
             if received_state and received_state in self.state_store:
                 stored_data = self.state_store[received_state]
                 original_redirect_uri = stored_data.get('original_redirect_uri')
                 original_state = stored_data.get('original_state')
                 
-                logger.info(f"Found stored data for state {received_state}: {stored_data}")
+                logger.debug(f"Found stored data for state {received_state}: {stored_data}")
                 
                 if original_redirect_uri and ('127.0.0.1' in original_redirect_uri or 'localhost' in original_redirect_uri):
                     # This is a proxied callback, forward to the virtual client
-                    logger.info(f"Proxying callback to virtual client: {original_redirect_uri}")
+                    logger.debug(f"Proxying callback to virtual client: {original_redirect_uri}")
                     
                     # Build query parameters for MCP Inspector
                     callback_params = dict(request.query)
@@ -244,16 +244,16 @@ class AuthHandler:
                     # If original request had no state, don't include it in callback
                     if original_state is None:
                         callback_params.pop('state', None)
-                        logger.info("Removing state parameter for virtual client (original had no state)")
+                        logger.debug("Removing state parameter for virtual client (original had no state)")
                     else:
                         callback_params['state'] = original_state
-                        logger.info(f"Using original state for virtual client: {original_state}")
+                        logger.debug(f"Using original state for virtual client: {original_state}")
                     
                     # Forward to virtual client
                     query_string = urlencode(callback_params)
                     final_redirect = f"{original_redirect_uri}?{query_string}"
                     
-                    logger.info(f"Final redirect URL: {final_redirect}")
+                    logger.debug(f"Final redirect URL: {final_redirect}")
                     
                     # Store the authorization code from Okta for PKCE verification during token exchange
                     auth_code = request.query.get('code')
@@ -270,19 +270,19 @@ class AuthHandler:
                             'expires_at': expires_at.isoformat(),  # SECURITY FIX: Add expiration
                             'used': False  # SECURITY FIX: Track if code has been used
                         }
-                        logger.info(f"Stored PKCE verifier for Okta auth code {auth_code} (expires: {expires_at})")
+                        logger.debug(f"Stored PKCE verifier for Okta auth code {auth_code} (expires: {expires_at})")
                     
                     # Clean up the original state entry (but keep the auth code mapping)
                     del self.state_store[received_state]
                     
                     return web.Response(status=302, headers={'Location': final_redirect})
             
-            logger.info("Processing as regular OAuth callback for web interface")
+            logger.debug("Processing as regular OAuth callback for web interface")
             # Regular OAuth callback handling for web interface
             from aiohttp_session import get_session
             session = await get_session(request)
             
-            logger.info(f"OAuth callback - Session contents: {dict(session)}")
+            logger.debug(f"OAuth callback - Session contents: {dict(session)}")
             
             # Check for OAuth errors
             if "error" in request.query:
@@ -294,8 +294,8 @@ class AuthHandler:
             received_state = request.query.get("state")
             session_state = session.get("app_state")
             
-            logger.info(f"State comparison - Received: {received_state}, Session: {session_state}")
-            logger.info(f"Backup store has {len(self.state_store)} entries")
+            logger.debug(f"State comparison - Received: {received_state}, Session: {session_state}")
+            logger.debug(f"Backup store has {len(self.state_store)} entries")
             
             # Try to get code verifier from session first, then backup store
             code_verifier = session.get("code_verifier")
@@ -305,11 +305,11 @@ class AuthHandler:
             
             # If session doesn't have the state, try backup store
             if received_state != session_state:
-                logger.info("Session state mismatch, checking backup store...")
+                logger.debug("Session state mismatch, checking backup store...")
                 if received_state in self.state_store:
                     stored_data = self.state_store[received_state]
                     code_verifier = stored_data['code_verifier']
-                    logger.info("Found state in backup store, using stored code verifier")
+                    logger.debug("Found state in backup store, using stored code verifier")
                 else:
                     logger.error(f"State not found in session or backup store! Received: {received_state}")
                     return web.json_response({
@@ -336,7 +336,7 @@ class AuthHandler:
                 }, status=400)
             
             # Exchange authorization code for access token using PKCE
-            logger.info(f"Exchanging authorization code for access token. Code: {code[:10]}...")
+            logger.debug(f"Exchanging authorization code for access token. Code: {code[:10]}...")
             
             redirect_uri = self.config.redirect_uri or str(request.url.with_path("/oauth/callback"))
             
@@ -709,7 +709,7 @@ class AuthHandler:
                 
                 if response.status_code == 200:
                     userinfo_data = response.json()
-                    logger.info(f"UserInfo endpoint response: {userinfo_data}")
+                    logger.debug(f"UserInfo endpoint response: {userinfo_data}")
                     
                     # Merge JWT info with UserInfo data, preferring UserInfo for profile data
                     comprehensive_info = {
@@ -740,7 +740,7 @@ class AuthHandler:
                             email_name = comprehensive_info["email"].split("@")[0].replace(".", " ").title()
                             comprehensive_info["name"] = email_name
                     
-                    logger.info(f"Comprehensive user info: {comprehensive_info}")
+                    logger.debug(f"Comprehensive user info: {comprehensive_info}")
                     return comprehensive_info
                 else:
                     logger.warning(f"UserInfo endpoint failed: {response.status_code} - {response.text}")
@@ -763,7 +763,7 @@ class AuthHandler:
                 logger.error("JWT verification failed")
                 return self._get_fallback_user_info()
             
-            logger.info(f"JWT token contents: {decoded}")
+            logger.debug(f"JWT token contents: {decoded}")
             
             # Get user info from JWT claims
             user_id = decoded.get("sub")  # Subject - usually user identifier
@@ -804,7 +804,7 @@ class AuthHandler:
                 "client_id": decoded.get("cid")
             }
             
-            logger.info(f"Extracted user info: {user_info}")
+            logger.debug(f"Extracted user info: {user_info}")
             return user_info
             
         except Exception as e:
@@ -841,9 +841,9 @@ class AuthHandler:
             # DEBUG: Decode token without verification to see its contents
             try:
                 unverified_payload = jwt.decode(access_token, options={"verify_signature": False})
-                logger.info(f"JWT token payload (unverified): {unverified_payload}")
-                logger.info(f"JWT audience in token: {unverified_payload.get('aud')}")
-                logger.info(f"Expected audience: {self.config.audience}")
+                logger.debug(f"JWT token payload (unverified): {unverified_payload}")
+                logger.debug(f"JWT audience in token: {unverified_payload.get('aud')}")
+                logger.debug(f"Expected audience: {self.config.audience}")
             except Exception as e:
                 logger.warning(f"Could not decode JWT for debugging: {e}")
             
@@ -899,7 +899,7 @@ class AuthHandler:
                 }
             )
             
-            logger.info(f"JWT verification successful for user: {decoded.get('sub')}")
+            logger.debug(f"JWT verification successful for user: {decoded.get('sub')}")
             return decoded
             
         except jwt.ExpiredSignatureError:
@@ -958,7 +958,7 @@ class AuthHandler:
         try:
             # Get registration request
             registration_data = await request.json()
-            logger.info(f"Client registration request: {registration_data}")
+            logger.debug(f"Client registration request: {registration_data}")
             
             # For MCP Inspector and similar tools, we can use our static client
             # but return a "virtual" registration that points to our proxy endpoints
@@ -1049,7 +1049,7 @@ class AuthHandler:
                     redirect_uri = request.query.get('redirect_uri', '')
                     scope = request.query.get('scope', 'openid profile email')
                     
-                    logger.info(f"Auto-registering virtual client {client_id} with redirect_uri: {redirect_uri}")
+                    logger.debug(f"Auto-registering virtual client {client_id} with redirect_uri: {redirect_uri}")
                     
                     # Create virtual client entry
                     self.virtual_clients[client_id] = {
@@ -1070,11 +1070,11 @@ class AuthHandler:
                         "auto_registered": True
                     }
                     
-                    logger.info(f"Successfully auto-registered virtual client: {client_id}")
+                    logger.debug(f"Successfully auto-registered virtual client: {client_id}")
                 else:
-                    logger.info(f"Virtual client {client_id} already registered")
+                    logger.debug(f"Virtual client {client_id} already registered")
                 
-                logger.info(f"Processing authorization request for virtual client {client_id}")
+                logger.debug(f"Processing authorization request for virtual client {client_id}")
                 
                 # Get session to check for pending consent
                 session = await get_session(request)
@@ -1083,7 +1083,7 @@ class AuthHandler:
                 # Check if this request has valid pending consent
                 if not pending_consent or pending_consent.get('virtual_client_id') != client_id:
                     # No valid consent - redirect to consent page
-                    logger.info(f"No valid consent for virtual client {client_id}, redirecting to consent page")
+                    logger.debug(f"No valid consent for virtual client {client_id}, redirecting to consent page")
                     consent_params = {
                         'client_id': client_id,
                         'redirect_uri': request.query.get('redirect_uri', ''),
@@ -1095,19 +1095,19 @@ class AuthHandler:
                     return web.Response(status=302, headers={'Location': consent_url})
                 
                 # Valid consent exists - proceed with OAuth flow
-                logger.info(f"Valid consent found for virtual client {client_id}, proceeding with OAuth")
+                logger.debug(f"Valid consent found for virtual client {client_id}, proceeding with OAuth")
                 
                 # Get original parameters
                 original_redirect_uri = request.query.get('redirect_uri')
                 original_state = request.query.get('state')
                 
-                logger.info(f"Original redirect_uri: {original_redirect_uri}")
-                logger.info(f"Original state: {original_state}")
+                logger.debug(f"Original redirect_uri: {original_redirect_uri}")
+                logger.debug(f"Original state: {original_state}")
                 
                 # Generate a state parameter if none provided (required for Okta)
                 if not original_state:
                     proxy_state = secrets.token_urlsafe(32)
-                    logger.info(f"Generated proxy state: {proxy_state}")
+                    logger.debug(f"Generated proxy state: {proxy_state}")
                 else:
                     proxy_state = original_state
                 
@@ -1119,7 +1119,7 @@ class AuthHandler:
                     'pending_consent': pending_consent,  # Store consent info for finalization
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
-                logger.info(f"Stored state mapping: {proxy_state} -> virtual_client: {client_id}")
+                logger.debug(f"Stored state mapping: {proxy_state} -> virtual_client: {client_id}")
                 
                 # Clear the pending consent from session (it will be finalized after OAuth callback)
                 session.pop('pending_consent', None)
@@ -1150,12 +1150,12 @@ class AuthHandler:
                 
                 auth_url = f"{self.config.authorization_url}?{urlencode(auth_params)}"
                 
-                logger.info(f"Redirecting to Okta authorization URL: {auth_url}")
+                logger.debug(f"Redirecting to Okta authorization URL: {auth_url}")
                 return web.Response(status=302, headers={'Location': auth_url})
             
             else:
                 # For non-virtual clients, just proxy the request directly
-                logger.info(f"Proxying authorization request for regular client {client_id}")
+                logger.debug(f"Proxying authorization request for regular client {client_id}")
                 return web.Response(text="Non-virtual client authorization not implemented", status=501)
                 
         except Exception as e:
@@ -1285,27 +1285,27 @@ class AuthHandler:
             grant_type = data.get('grant_type')
             client_id = data.get('client_id')
             
-            logger.info(f"Token request: grant_type={grant_type}, client_id={client_id}")
+            logger.debug(f"Token request: grant_type={grant_type}, client_id={client_id}")
             
             if grant_type == 'authorization_code':
                 auth_code = data.get('code')
                 redirect_uri = data.get('redirect_uri')
                 code_verifier = data.get('code_verifier')
                 
-                logger.info(f"Token request for authorization code: {auth_code[:20]}...")
-                logger.info(f"Received code verifier: {code_verifier[:20] if code_verifier else 'None'}...")
+                logger.debug(f"Token request for authorization code: {auth_code[:20]}...")
+                logger.debug(f"Received code verifier: {code_verifier[:20] if code_verifier else 'None'}...")
                 
                 # Look up the stored PKCE verifier and virtual client info
                 if auth_code not in self.state_store:
                     logger.error(f"Unknown authorization code: {auth_code}")
-                    logger.info(f"Available auth codes in state store: {list(self.state_store.keys())}")
+                    logger.debug(f"Available auth codes in state store: {list(self.state_store.keys())}")
                     return web.json_response({
                         "error": "invalid_grant",
                         "error_description": "Authorization code not found or expired"
                     }, status=400, headers={"Access-Control-Allow-Origin": "*"})
                 
                 stored_data = self.state_store[auth_code]
-                logger.info(f"Found stored data: {stored_data}")
+                logger.debug(f"Found stored data: {stored_data}")
                 
                 # SECURITY FIX: Check if code has already been used
                 if stored_data.get('used', False):
@@ -1338,14 +1338,14 @@ class AuthHandler:
                 virtual_client_id = stored_data.get('virtual_client_id')
                 stored_code_verifier = stored_data.get('code_verifier')
                 
-                logger.info(f"Found stored data for virtual client: {virtual_client_id}")
-                logger.info(f"Stored code verifier: {stored_code_verifier[:20] if stored_code_verifier else 'None'}...")
+                logger.debug(f"Found stored data for virtual client: {virtual_client_id}")
+                logger.debug(f"Stored code verifier: {stored_code_verifier[:20] if stored_code_verifier else 'None'}...")
                 
                 # Verify PKCE code verifier
                 # NOTE: For virtual clients, we ignore the code_verifier they send
                 # and use our stored one from the OAuth flow since we're acting as a proxy
-                logger.info(f"Virtual client sent code verifier: {code_verifier[:20] if code_verifier else 'None'}...")
-                logger.info(f"Using stored code verifier for Okta exchange: {stored_code_verifier[:20] if stored_code_verifier else 'None'}...")
+                logger.debug(f"Virtual client sent code verifier: {code_verifier[:20] if code_verifier else 'None'}...")
+                logger.debug(f"Using stored code verifier for Okta exchange: {stored_code_verifier[:20] if stored_code_verifier else 'None'}...")
                 
                 # For virtual clients, we need to exchange the real authorization code with Okta
                 # and then create a virtual access token for the virtual client
@@ -1415,3 +1415,73 @@ class AuthHandler:
                 status=500,
                 headers={"Access-Control-Allow-Origin": "*"}
             )
+
+    async def cleanup_expired_entries(self):
+        """Clean up expired entries from various stores"""
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # Clean up expired state store entries
+            expired_states = []
+            for state, data in self.state_store.items():
+                if isinstance(data, dict):
+                    # Check for timestamp-based expiration (older entries)
+                    created_at_str = data.get('timestamp')
+                    if created_at_str:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                            if now > created_at + timedelta(hours=1):  # 1 hour expiration
+                                expired_states.append(state)
+                        except ValueError:
+                            pass
+                    
+                    # Check for explicit expiration (auth codes)
+                    expires_at_str = data.get('expires_at')
+                    if expires_at_str:
+                        try:
+                            expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                            if now > expires_at:
+                                expired_states.append(state)
+                        except ValueError:
+                            pass
+            
+            # Remove expired state entries
+            for state in expired_states:
+                del self.state_store[state]
+                logger.debug(f"Cleaned up expired state entry: {state}")
+            
+            # Clean up expired virtual tokens
+            expired_tokens = []
+            for token, token_data in self.tokens.items():
+                if isinstance(token_data, dict):
+                    created_at_str = token_data.get('created_at')
+                    expires_in = token_data.get('expires_in', 3600)
+                    if created_at_str:
+                        try:
+                            created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                            if now > created_at + timedelta(seconds=expires_in):
+                                expired_tokens.append(token)
+                        except ValueError:
+                            pass
+            
+            # Remove expired tokens
+            for token in expired_tokens:
+                del self.tokens[token]
+                logger.debug(f"Cleaned up expired virtual token: {token[:20]}...")
+            
+            # Clean up expired user consents
+            expired_consents = []
+            for consent_key, consent in self.user_consents.items():
+                if hasattr(consent, 'expires_at') and now > consent.expires_at:
+                    expired_consents.append(consent_key)
+            
+            # Remove expired consents
+            for consent_key in expired_consents:
+                del self.user_consents[consent_key]
+                logger.debug(f"Cleaned up expired user consent: {consent_key}")
+            
+            if expired_states or expired_tokens or expired_consents:
+                logger.info(f"Cleanup completed: {len(expired_states)} states, {len(expired_tokens)} tokens, {len(expired_consents)} consents removed")
+            
+        except Exception as e:
+            logger.error(f"Cleanup task failed: {e}")

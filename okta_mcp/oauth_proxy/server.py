@@ -109,8 +109,9 @@ class OAuthFastMCPProxy:
     def _audit_log(self, event_type: str, user_id: str = None, details: dict = None):
         """Security audit logging"""
         import json
+        from datetime import timezone
         audit_entry = {
-            'timestamp': datetime.utcnow().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'event_type': event_type,
             'user_id': user_id,
             'details': details or {}
