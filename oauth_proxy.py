@@ -504,9 +504,9 @@ class OAuthFastMCPProxy:
                 
                 logger.info(f"Found stored data for state {received_state}: {stored_data}")
                 
-                if original_redirect_uri and '127.0.0.1:6274' in original_redirect_uri:
-                    # This is a proxied callback, forward to MCP Inspector
-                    logger.info(f"Proxying callback to MCP Inspector: {original_redirect_uri}")
+                if original_redirect_uri and ('127.0.0.1' in original_redirect_uri or 'localhost' in original_redirect_uri):
+                    # This is a proxied callback, forward to the virtual client
+                    logger.info(f"Proxying callback to virtual client: {original_redirect_uri}")
                     
                     # Build query parameters for MCP Inspector
                     callback_params = dict(request.query)
@@ -514,12 +514,12 @@ class OAuthFastMCPProxy:
                     # If original request had no state, don't include it in callback
                     if original_state is None:
                         callback_params.pop('state', None)
-                        logger.info("Removing state parameter for MCP Inspector (original had no state)")
+                        logger.info("Removing state parameter for virtual client (original had no state)")
                     else:
                         callback_params['state'] = original_state
-                        logger.info(f"Using original state for MCP Inspector: {original_state}")
+                        logger.info(f"Using original state for virtual client: {original_state}")
                     
-                    # Forward to MCP Inspector
+                    # Forward to virtual client
                     from urllib.parse import urlencode
                     query_string = urlencode(callback_params)
                     final_redirect = f"{original_redirect_uri}?{query_string}"
@@ -1616,9 +1616,36 @@ class OAuthFastMCPProxy:
                 return web.Response(text="Missing client_id parameter", status=400)
             
             if client_id.startswith('virtual-'):
-                # Check if virtual client exists
+                # Check if virtual client exists, if not, auto-register it
                 if client_id not in self.virtual_clients:
-                    return web.Response(text=f"Unknown virtual client: {client_id}", status=400)
+                    # Auto-register virtual client for VS Code and similar MCP clients
+                    redirect_uri = request.query.get('redirect_uri', '')
+                    scope = request.query.get('scope', 'openid profile email')
+                    
+                    logger.info(f"Auto-registering virtual client {client_id} with redirect_uri: {redirect_uri}")
+                    
+                    # Create virtual client entry
+                    self.virtual_clients[client_id] = {
+                        "client_name": f"Auto-registered MCP Client ({client_id})",
+                        "redirect_uris": [redirect_uri] if redirect_uri else [],
+                        "scopes": scope.split() if scope else ['openid', 'profile', 'email'],
+                        "token_endpoint_auth_method": "none",
+                        "registered_at": datetime.now(timezone.utc).isoformat(),
+                        "auto_registered": True
+                    }
+                    
+                    # Also maintain backward compatibility with sessions storage
+                    self.sessions[client_id] = {
+                        "client_name": f"Auto-registered MCP Client ({client_id})",
+                        "redirect_uris": [redirect_uri] if redirect_uri else [],
+                        "scopes": scope.split() if scope else ['openid', 'profile', 'email'],
+                        "registered_at": datetime.now(timezone.utc).isoformat(),
+                        "auto_registered": True
+                    }
+                    
+                    logger.info(f"Successfully auto-registered virtual client: {client_id}")
+                else:
+                    logger.info(f"Virtual client {client_id} already registered")
                 
                 logger.info(f"Processing authorization request for virtual client {client_id}")
                 
