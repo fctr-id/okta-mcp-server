@@ -96,6 +96,29 @@ security_headers = {
 - **Credentials support**: Secure cookie transmission
 - **Method restrictions**: Only necessary HTTP methods allowed
 
+### 6. RFC 6750 Compliant Error Responses
+
+**Protection**: Proper OAuth error communication to clients
+
+**Implementation**:
+- **WWW-Authenticate header**: All 401 responses include proper authentication challenge
+- **Resource metadata URL**: Points clients to OAuth protected resource metadata
+- **Standard error codes**: Uses RFC-compliant error codes (`invalid_token`)
+- **Descriptive messages**: Clear guidance for client authentication
+
+```python
+# RFC 6750 compliant 401 response
+def _create_401_response(self, request: web.Request, error_description: str) -> web.Response:
+    resource_metadata_url = f"{request.scheme}://{request.host}/.well-known/oauth-protected-resource"
+    www_authenticate = f'Bearer realm="Okta MCP Server", resource_metadata="{resource_metadata_url}"'
+    
+    return web.json_response(
+        {"error": "invalid_token", "error_description": error_description},
+        status=401,
+        headers={"WWW-Authenticate": www_authenticate}
+    )
+```
+
 ## Proxy-to-Okta Security Protections
 
 ### 1. JWT Token Validation
@@ -285,6 +308,12 @@ audit_entry = {
 - ✅ Secure redirect URI handling
 - ✅ State parameter for CSRF protection
 
+**OAuth 2.0 Bearer Token Usage (RFC 6750)**:
+- ✅ WWW-Authenticate header in 401 responses
+- ✅ Resource metadata URL for client guidance
+- ✅ Standard error codes and descriptions
+- ✅ Proper authentication realm specification
+
 **MCP Security Best Practices**:
 - ✅ User-bound session management
 - ✅ No direct token passthrough
@@ -345,6 +374,7 @@ SESSION_SECRET_KEY=<32-byte-base64-key>
 - ✅ Authorization code expiration
 - ✅ Virtual token isolation
 - ✅ Security audit logging
+- ✅ RFC 6750 compliant 401 responses with WWW-Authenticate headers
 
 ### Phase 2 (Short-term)
 - [ ] Rate limiting on OAuth endpoints

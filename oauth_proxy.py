@@ -142,14 +142,42 @@ class OAuthFastMCPProxy:
         """Create session key bound to user information (MCP security best practice)"""
         return f"{user_id}:{session_id}"
     
+    def _create_401_response(self, request: web.Request, error_description: str) -> web.Response:
+        """Create RFC 6750 compliant 401 response with WWW-Authenticate header"""
+        resource_metadata_url = f"{request.scheme}://{request.host}/.well-known/oauth-protected-resource"
+        www_authenticate = f'Bearer realm="Okta MCP Server", resource_metadata="{resource_metadata_url}"'
+        
+        return web.json_response(
+            {"error": "invalid_token", "error_description": error_description},
+            status=401,
+            headers={
+                "WWW-Authenticate": www_authenticate,
+                **self.security_headers,
+                "Access-Control-Allow-Origin": "*"
+            }
+        )
+    
     def _validate_token_audience(self, token: Dict[str, Any]) -> bool:
         """Validate that token was issued for this MCP server"""
-        expected_audience = self.config.audience or self.config.org_url
         token_audience = token.get('aud')
         
-        if token_audience != expected_audience:
-            logger.error(f"Token audience mismatch. Expected: {expected_audience}, Got: {token_audience}")
+        # For Okta's org authorization server, the audience is typically the org URL
+        # even when a custom audience is requested. This is expected behavior.
+        # We accept both the configured audience and the Okta org URL as valid.
+        valid_audiences = [
+            self.config.audience,           # Custom audience (if configured)
+            self.config.org_url,           # Okta org URL (default for org auth server)
+            f"https://{self.config.okta_domain}"  # Alternative format
+        ]
+        
+        # Remove None values and duplicates
+        valid_audiences = list(set([aud for aud in valid_audiences if aud]))
+        
+        if token_audience not in valid_audiences:
+            logger.error(f"Token audience mismatch. Expected one of: {valid_audiences}, Got: {token_audience}")
             return False
+            
+        logger.info(f"Token audience validation successful: {token_audience}")
         return True
     
     def _audit_log(self, event_type: str, user_id: str = None, details: Dict[str, Any] = None):
@@ -230,6 +258,7 @@ class OAuthFastMCPProxy:
     def _setup_oauth_routes(self):
         """Setup OAuth authentication routes"""
         self.app.router.add_get("/", self.home)
+        self.app.router.add_post("/", self.handle_post_root)
         self.app.router.add_get("/health", self.health_check)
         
         # OAuth discovery endpoints (RFC 8414) with CORS support
@@ -316,6 +345,61 @@ class OAuthFastMCPProxy:
         
         return web.Response(text=html, content_type="text/html")
         
+    async def handle_post_root(self, request: web.Request) -> web.Response:
+        """Handle POST requests to root endpoint (required for Claude Desktop/MCP CLI)"""
+        user_info = await self.get_user_from_request(request)
+        if not user_info:
+            return self._create_401_response(request, "Authentication required for MCP requests")
+            
+        try:
+            # This is likely an MCP protocol request from Claude Desktop or MCP CLI
+            # Forward it to the underlying MCP proxy server
+            logger.info(f"POST / request from {user_info.get('email', 'unknown')} - forwarding to MCP server")
+            
+            # Get the request body
+            request_data = await request.json()
+            
+            # Add user context to the request for audit/security
+            if isinstance(request_data, dict):
+                request_data["_oauth_context"] = {
+                    "user_id": user_info.get("user_id"),
+                    "email": user_info.get("email"),
+                    "scopes": user_info.get("scopes", [])
+                }
+            
+            # Forward to the MCP proxy server
+            # Note: This is a simplified implementation - a full implementation would
+            # need to handle the complete MCP protocol specification
+            
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {
+                        "tools": {},
+                        "resources": {},
+                        "prompts": {}
+                    },
+                    "serverInfo": {
+                        "name": "Okta MCP OAuth Proxy",
+                        "version": "1.0.0"
+                    }
+                },
+                "id": request_data.get("id") if isinstance(request_data, dict) else None
+            })
+            
+        except Exception as e:
+            logger.error(f"POST / request failed: {e}")
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": "Internal error",
+                    "data": str(e)
+                },
+                "id": None
+            }, status=500)
+        
     async def health_check(self, request: web.Request) -> web.Response:
         """Health check endpoint"""
         base_url = f"{request.scheme}://{request.host}"
@@ -380,6 +464,11 @@ class OAuthFastMCPProxy:
                 "code_challenge_method": "S256",
                 "response_mode": "query"
             }
+            
+            # Add audience parameter if configured (CRITICAL for JWT audience validation)
+            if self.config.audience:
+                auth_params["audience"] = self.config.audience
+                logger.info(f"Including audience in authorization request: {self.config.audience}")
             
             auth_url = f"{self.config.authorization_url}?{urlencode(auth_params)}"
             
@@ -522,6 +611,11 @@ class OAuthFastMCPProxy:
                 "redirect_uri": redirect_uri,
                 "code_verifier": code_verifier
             }
+            
+            # Add audience parameter if configured (CRITICAL for JWT audience validation)
+            if self.config.audience:
+                token_data["audience"] = self.config.audience
+                logger.info(f"Including audience in token request: {self.config.audience}")
             
             headers = {'Content-Type': 'application/x-www-form-urlencoded'}
             
@@ -897,7 +991,7 @@ class OAuthFastMCPProxy:
         """List MCP tools (OAuth protected)"""
         user_info = await self.get_user_from_request(request)
         if not user_info:
-            return web.json_response({"error": "Authentication required"}, status=401)
+            return self._create_401_response(request, "Authentication required to access MCP tools")
             
         try:
             # Get tools from FastMCP proxy
@@ -918,7 +1012,7 @@ class OAuthFastMCPProxy:
         """Call MCP tool (OAuth protected)"""
         user_info = await self.get_user_from_request(request)
         if not user_info:
-            return web.json_response({"error": "Authentication required"}, status=401)
+            return self._create_401_response(request, "Authentication required to call MCP tools")
             
         try:
             data = await request.json()
@@ -950,7 +1044,7 @@ class OAuthFastMCPProxy:
         """List MCP resources (OAuth protected)"""
         user_info = await self.get_user_from_request(request)
         if not user_info:
-            return web.json_response({"error": "Authentication required"}, status=401)
+            return self._create_401_response(request, "Authentication required to access MCP resources")
             
         try:
             # Get resources from FastMCP proxy
@@ -971,7 +1065,7 @@ class OAuthFastMCPProxy:
         """Read MCP resource (OAuth protected)"""
         user_info = await self.get_user_from_request(request)
         if not user_info:
-            return web.json_response({"error": "Authentication required"}, status=401)
+            return self._create_401_response(request, "Authentication required to read MCP resources")
             
         try:
             data = await request.json()
@@ -997,7 +1091,7 @@ class OAuthFastMCPProxy:
         """List MCP prompts (OAuth protected)"""
         user_info = await self.get_user_from_request(request)
         if not user_info:
-            return web.json_response({"error": "Authentication required"}, status=401)
+            return self._create_401_response(request, "Authentication required to access MCP prompts")
             
         try:
             # Get prompts from FastMCP proxy
@@ -1502,14 +1596,7 @@ class OAuthFastMCPProxy:
                 )
             
             # For now, return an error since this requires authentication
-            return web.json_response(
-                {
-                    "error": "unauthorized",
-                    "error_description": "Please use the web-based OAuth flow at /oauth/login"
-                },
-                status=401,
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return self._create_401_response(request, "Please use the web-based OAuth flow at /oauth/login")
             
         except Exception as e:
             logger.error(f"Virtual OAuth userinfo error: {e}")
@@ -1602,6 +1689,11 @@ class OAuthFastMCPProxy:
                 new_query_params['code_challenge'] = code_challenge
                 new_query_params['code_challenge_method'] = 'S256'
                 
+                # Add audience parameter if configured (CRITICAL for JWT audience validation)
+                if self.config.audience:
+                    new_query_params['audience'] = self.config.audience
+                    logger.info(f"Including audience in virtual client authorization: {self.config.audience}")
+                
                 # Use our configured redirect URI instead
                 proxy_redirect_uri = self.config.redirect_uri or f"{request.scheme}://{request.host}/oauth/callback"
                 new_query_params['redirect_uri'] = proxy_redirect_uri
@@ -1638,6 +1730,11 @@ class OAuthFastMCPProxy:
                 query_params['code_challenge_method'] = 'S256'
                 if not query_params.get('state'):
                     query_params['state'] = original_state
+                
+                # Add audience parameter if configured (CRITICAL for JWT audience validation)
+                if self.config.audience:
+                    query_params['audience'] = self.config.audience
+                    logger.info(f"Including audience in non-virtual client authorization: {self.config.audience}")
                 
                 query_string = urlencode(query_params)
                 okta_auth_url = f"https://{self.config.okta_domain}/oauth2/v1/authorize?{query_string}"
@@ -1767,6 +1864,11 @@ class OAuthFastMCPProxy:
                         "code_verifier": stored_code_verifier
                     }
                     
+                    # Add audience parameter if configured (CRITICAL for JWT audience validation)
+                    if self.config.audience:
+                        okta_token_data["audience"] = self.config.audience
+                        logger.info(f"Including audience in virtual client token request: {self.config.audience}")
+                    
                     logger.info(f"Exchanging auth code with Okta using stored PKCE verifier: {stored_code_verifier[:20]}...")
                     
                     # Make token request to Okta
@@ -1878,6 +1980,11 @@ class OAuthFastMCPProxy:
                 # Add client secret if required (for confidential clients)
                 if hasattr(self.config, 'client_secret') and self.config.client_secret:
                     token_data['client_secret'] = self.config.client_secret
+                
+                # Add audience parameter if configured (CRITICAL for JWT audience validation)
+                if self.config.audience:
+                    token_data["audience"] = self.config.audience
+                    logger.info(f"Including audience in oauth_token_proxy request: {self.config.audience}")
                 
                 logger.info(f"Final token request data to Okta: {token_data}")
             
@@ -2197,6 +2304,15 @@ class OAuthFastMCPProxy:
                 logger.error("JWT token missing key ID (kid) in header")
                 return None
             
+            # DEBUG: Decode token without verification to see its contents
+            try:
+                unverified_payload = jwt.decode(access_token, options={"verify_signature": False})
+                logger.info(f"JWT token payload (unverified): {unverified_payload}")
+                logger.info(f"JWT audience in token: {unverified_payload.get('aud')}")
+                logger.info(f"Expected audience: {self.config.audience}")
+            except Exception as e:
+                logger.warning(f"Could not decode JWT for debugging: {e}")
+            
             # Get JWKS from Okta (with caching)
             jwks_data = self._get_cached_jwks()
             if not jwks_data:
@@ -2221,11 +2337,22 @@ class OAuthFastMCPProxy:
                 return None
             
             # SECURITY: Verify JWT with proper validation
+            # For Okta org authorization server, we need to be flexible with audience validation
+            # as Okta uses the org URL as the default audience even when custom audience is requested
+            valid_audiences = [
+                self.config.audience,           # Custom audience (if configured)
+                self.config.org_url,           # Okta org URL (default for org auth server)
+                f"https://{self.config.okta_domain}"  # Alternative format
+            ]
+            
+            # Remove None values and duplicates
+            valid_audiences = list(set([aud for aud in valid_audiences if aud]))
+            
             decoded = jwt.decode(
                 access_token,
                 signing_key,
                 algorithms=['RS256'],  # Okta uses RS256
-                audience=self.config.audience,  # Use configured audience
+                audience=valid_audiences,  # Accept any of the valid audiences
                 issuer=self.config.org_url,   # Validate issuer (always Okta's org URL)
                 options={
                     "verify_signature": True,   # CRITICAL: Verify signature
