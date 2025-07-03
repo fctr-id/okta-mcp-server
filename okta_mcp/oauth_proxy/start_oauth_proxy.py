@@ -16,8 +16,8 @@ def main():
     # Get the directory of this script
     script_dir = Path(__file__).parent
     
-    # Default settings
-    backend = script_dir / "main.py"
+    # Default settings - backend is now at the project root
+    backend = script_dir.parent.parent / "main.py"
     host = "localhost"
     port = "3001"
     
@@ -26,8 +26,8 @@ def main():
         print(f"Error: Backend MCP server not found at {backend}")
         sys.exit(1)
     
-    # Check if .env file exists
-    env_file = script_dir / ".env"
+    # Check if .env file exists - look in project root
+    env_file = script_dir.parent.parent / ".env"
     if not env_file.exists():
         print("Warning: .env file not found. Make sure to configure Okta settings.")
     

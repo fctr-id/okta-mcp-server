@@ -16,7 +16,7 @@ Make sure your OAuth proxy server is running:
 
 ```bash
 cd C:\Users\Dharanidhar\Desktop\github-repos\okta-mcp-server
-python oauth_proxy.py
+python okta_mcp/oauth_proxy/oauth_proxy.py
 ```
 
 You should see:
@@ -175,7 +175,7 @@ The MCP server requests these permissions:
 
 ### 1. "Connection refused" 
 - **Cause**: OAuth proxy server not running
-- **Solution**: Start `python oauth_proxy.py`
+- **Solution**: Start `python okta_mcp/oauth_proxy/oauth_proxy.py`
 
 ### 2. "401 Unauthorized"
 - **Cause**: Not authenticated or session expired
@@ -200,7 +200,7 @@ If you need to run on a different port:
 
 1. **Update OAuth proxy startup**:
 ```bash
-python oauth_proxy.py --port 3002
+python okta_mcp/oauth_proxy/oauth_proxy.py --port 3002
 ```
 
 2. **Update Claude Desktop config**:

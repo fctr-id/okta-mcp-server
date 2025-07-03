@@ -34,10 +34,10 @@ OKTA_SCOPES=openid profile email okta.users.read okta.groups.read okta.apps.read
 
 ```bash
 # Simple startup
-python start_oauth_proxy.py
+python okta_mcp/oauth_proxy/start_oauth_proxy.py
 
 # Or with custom settings
-python oauth_proxy.py --backend ./main.py --host localhost --port 3001
+python okta_mcp/oauth_proxy/oauth_proxy.py --backend ./main.py --host localhost --port 3001
 ```
 
 ### 4. Use with MCP Inspector
@@ -83,7 +83,7 @@ The proxy provides these standard OAuth 2.0 endpoints:
 ### Command Line Options
 
 ```bash
-python oauth_proxy.py --help
+python okta_mcp/oauth_proxy/oauth_proxy.py --help
 ```
 
 - `--backend`: Path to the backend MCP server
