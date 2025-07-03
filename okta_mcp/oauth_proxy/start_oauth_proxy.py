@@ -31,11 +31,11 @@ def main():
     if not env_file.exists():
         print("Warning: .env file not found. Make sure to configure Okta settings.")
     
-    # Build command
-    oauth_proxy = script_dir / "oauth_proxy.py"
+    # Build command - use the new modular server
+    server_script = script_dir / "server.py"
     cmd = [
         sys.executable,
-        str(oauth_proxy),
+        str(server_script),
         "--backend", str(backend),
         "--host", host,
         "--port", port
