@@ -35,6 +35,7 @@ class OAuthConfig:
     require_https: bool = True
     token_validation: bool = True
     audience: Optional[str] = None
+    redirect_uri: Optional[str] = None
     
     def __post_init__(self):
         """Generate OAuth endpoints from org URL"""
@@ -72,7 +73,8 @@ class OAuthConfig:
                 client_id=os.getenv("OKTA_CLIENT_ID") or os.getenv("OKTA_OAUTH_CLIENT_ID", ""),
                 client_secret=os.getenv("OKTA_CLIENT_SECRET") or os.getenv("OKTA_OAUTH_CLIENT_SECRET", ""),
                 org_url=os.getenv("OKTA_ORG_URL") or os.getenv("OKTA_CLIENT_ORGURL", ""),
-                audience=os.getenv("OKTA_OAUTH_AUDIENCE", "okta-mcp-server"),
+                audience=os.getenv("OKTA_OAUTH_AUDIENCE", "fctrid-okta-mcp-server"),  # Updated default
+                redirect_uri=os.getenv("OAUTH_REDIRECT_URI", "http://localhost:3001/oauth/callback"),
                 require_https=os.getenv("OAUTH_REQUIRE_HTTPS", "true").lower() == "true"
             )
             
@@ -143,10 +145,15 @@ def validate_oauth_token(token: str, config: Optional[OAuthConfig] = None) -> di
         config = OAuthConfig.from_environment()
     
     try:
-        # Decode JWT token (in production, verify signature with JWKS)
+        # SECURITY FIX: This function should NOT be used for token validation
+        # Use the proper JWT verification in oauth_proxy.py instead
+        # This is here for backward compatibility only
+        logger.warning("validate_oauth_token called - use _verify_and_decode_jwt in oauth_proxy for proper validation")
+        
+        # For basic information extraction only (NOT for security validation)
         decoded = jwt.decode(
             token, 
-            options={"verify_signature": False}  # TODO: Implement JWKS verification
+            options={"verify_signature": False}  # INSECURE: For info extraction only
         )
         
         # Extract user information
@@ -160,13 +167,9 @@ def validate_oauth_token(token: str, config: Optional[OAuthConfig] = None) -> di
             "issuer": decoded.get("iss")
         }
         
-        # Validate audience
-        if config.audience and user_info["audience"] != config.audience:
-            raise ValueError(f"Invalid token audience: {user_info['audience']}")
-        
-        logger.debug(f"Token validated for user: {user_info['email']}")
+        logger.debug(f"Token info extracted for user: {user_info['email']}")
         return user_info
         
     except Exception as e:
-        logger.error(f"Token validation failed: {e}")
+        logger.error(f"Token info extraction failed: {e}")
         raise

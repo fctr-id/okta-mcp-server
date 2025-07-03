@@ -15,3 +15,4 @@ okta_mcp/tools/fetc_grp_pagination.py
 okta_mcp/tools/create_grps.py
 clients/event-stream-monitor.py
 clients/mcp-*.py
+oauth_proxy.log

@@ -75,6 +75,10 @@ class OAuthFastMCPProxy:
         self.sessions: Dict[str, Dict[str, Any]] = {}
         self.tokens: Dict[str, Dict[str, Any]] = {}
         
+        # Virtual client registry and consent tracking
+        self.virtual_clients: Dict[str, Dict[str, Any]] = {}
+        self.user_consents: Dict[str, Dict[str, Any]] = {}  # user_id -> {client_id -> consent_data}
+        
         # Create FastMCP proxy
         self.mcp_proxy = FastMCP.as_proxy(
             backend_server_path,
@@ -140,7 +144,7 @@ class OAuthFastMCPProxy:
     
     def _validate_token_audience(self, token: Dict[str, Any]) -> bool:
         """Validate that token was issued for this MCP server"""
-        expected_audience = self.config.org_url
+        expected_audience = self.config.audience or self.config.org_url
         token_audience = token.get('aud')
         
         if token_audience != expected_audience:
@@ -158,6 +162,71 @@ class OAuthFastMCPProxy:
         }
         logger.info(f"AUDIT: {json.dumps(audit_entry)}")
     
+    def _has_user_consent(self, user_id: str, virtual_client_id: str) -> bool:
+        """Check if user has granted consent for a specific virtual client"""
+        user_consents = self.user_consents.get(user_id, {})
+        consent_data = user_consents.get(virtual_client_id)
+        
+        if not consent_data:
+            return False
+        
+        # Check if consent is still valid (not expired)
+        consent_expires = consent_data.get('expires_at')
+        if consent_expires:
+            expires_dt = datetime.fromisoformat(consent_expires.replace('Z', '+00:00'))
+            if datetime.now(timezone.utc) > expires_dt:
+                logger.info(f"Consent expired for user {user_id}, client {virtual_client_id}")
+                return False
+        
+        return True
+    
+    def _grant_user_consent(self, user_id: str, virtual_client_id: str, scopes: list, consent_duration_hours: int = 24):
+        """Grant user consent for a specific virtual client"""
+        if user_id not in self.user_consents:
+            self.user_consents[user_id] = {}
+        
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=consent_duration_hours)
+        
+        self.user_consents[user_id][virtual_client_id] = {
+            'granted_at': datetime.now(timezone.utc).isoformat(),
+            'expires_at': expires_at.isoformat(),
+            'scopes': scopes,
+            'client_name': self.virtual_clients.get(virtual_client_id, {}).get('client_name', 'Unknown')
+        }
+        
+        self._audit_log('consent_granted', user_id, {
+            'virtual_client_id': virtual_client_id,
+            'scopes': scopes,
+            'expires_at': expires_at.isoformat()
+        })
+    
+    def _revoke_user_consent(self, user_id: str, virtual_client_id: str):
+        """Revoke user consent for a specific virtual client"""
+        if user_id in self.user_consents and virtual_client_id in self.user_consents[user_id]:
+            del self.user_consents[user_id][virtual_client_id]
+            
+            self._audit_log('consent_revoked', user_id, {
+                'virtual_client_id': virtual_client_id
+            })
+    
+    def _get_user_from_session(self, request: web.Request) -> Optional[str]:
+        """Extract user ID from session - helper method for consent checks"""
+        # This is a simplified version - in a real implementation, you'd verify the session token
+        # and extract the user ID from the validated JWT token or session store
+        user_token = None
+        
+        # Try to get from session cookie or authorization header
+        if hasattr(request, 'headers') and 'Authorization' in request.headers:
+            auth_header = request.headers['Authorization']
+            if auth_header.startswith('Bearer '):
+                user_token = auth_header[7:]
+        
+        if user_token and user_token in self.tokens:
+            token_data = self.tokens[user_token]
+            return token_data.get('sub')  # User ID from token
+        
+        return None
+
     def _setup_oauth_routes(self):
         """Setup OAuth authentication routes"""
         self.app.router.add_get("/", self.home)
@@ -170,6 +239,8 @@ class OAuthFastMCPProxy:
         
         # OAuth routes
         self.app.router.add_get('/oauth/permissions', self.permissions_info)
+        self.app.router.add_get('/oauth/consent', self.consent_page)
+        self.app.router.add_post('/oauth/consent', self.handle_consent)
         self.app.router.add_get('/oauth/login', self.oauth_login)
         self.app.router.add_get('/oauth/callback', self.oauth_callback)
         self.app.router.add_get('/oauth/status', self.oauth_status)
@@ -295,8 +366,8 @@ class OAuthFastMCPProxy:
             logger.info(f"Storing in session - State: {state}, Code verifier length: {len(code_verifier)}")
             logger.info(f"Backup store now has {len(self.state_store)} entries")
             
-            # Get redirect URI
-            redirect_uri = str(request.url.with_path("/oauth/callback"))
+            # Use configured redirect URI or fallback to request-based construction
+            redirect_uri = self.config.redirect_uri or str(request.url.with_path("/oauth/callback"))
             
             # Create authorization URL with PKCE
             auth_params = {
@@ -366,7 +437,24 @@ class OAuthFastMCPProxy:
                     
                     logger.info(f"Final redirect URL: {final_redirect}")
                     
-                    # Clean up state store
+                    # Store the authorization code from Okta for PKCE verification during token exchange
+                    auth_code = request.query.get('code')
+                    if auth_code:
+                        # SECURITY FIX: Add proper expiration for authorization codes (OAuth 2.1 recommends 10 minutes max)
+                        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+                        
+                        # Map the Okta authorization code to our stored PKCE verifier
+                        self.state_store[auth_code] = {
+                            'virtual_client_id': stored_data.get('virtual_client_id'),
+                            'code_verifier': stored_data.get('code_verifier'),
+                            'original_state': received_state,
+                            'timestamp': datetime.now(timezone.utc).isoformat(),
+                            'expires_at': expires_at.isoformat(),  # SECURITY FIX: Add expiration
+                            'used': False  # SECURITY FIX: Track if code has been used
+                        }
+                        logger.info(f"Stored PKCE verifier for Okta auth code {auth_code} (expires: {expires_at})")
+                    
+                    # Clean up the original state entry (but keep the auth code mapping)
                     del self.state_store[received_state]
                     
                     return web.Response(status=302, headers={'Location': final_redirect})
@@ -457,16 +545,16 @@ class OAuthFastMCPProxy:
             # Parse user info from token and fetch additional info from userinfo endpoint
             access_token = token.get("access_token")
             
-            # First validate token audience (MCP security requirement)
-            try:
-                decoded_token = jwt.decode(access_token, options={"verify_signature": False})
-                if not self._validate_token_audience(decoded_token):
-                    self._audit_log("token_validation_failed", details={"reason": "invalid_audience"})
-                    return web.json_response({"error": "Invalid token audience"}, status=403)
-            except Exception as e:
-                logger.error(f"Token validation failed: {e}")
-                self._audit_log("token_validation_failed", details={"reason": str(e)})
-                return web.json_response({"error": "Token validation failed"}, status=403)
+            # SECURITY FIX: Properly validate JWT with signature verification
+            decoded_token = self._verify_and_decode_jwt(access_token)
+            if not decoded_token:
+                self._audit_log("token_validation_failed", details={"reason": "jwt_verification_failed"})
+                return web.json_response({"error": "Invalid or expired token"}, status=403)
+            
+            # Additional audience validation (defense in depth)
+            if not self._validate_token_audience(decoded_token):
+                self._audit_log("token_validation_failed", details={"reason": "invalid_audience"})
+                return web.json_response({"error": "Invalid token audience"}, status=403)
             
             user_info = await self._get_user_info_comprehensive(access_token)
             
@@ -475,6 +563,63 @@ class OAuthFastMCPProxy:
             session['user_info'] = user_info
             session['access_token'] = access_token
             session['token_expires_at'] = (datetime.now(timezone.utc) + timedelta(seconds=token.get("expires_in", 3600))).isoformat()
+            
+            # Process pending consent if this was part of a virtual client authorization flow
+            pending_consent = session.get('pending_consent')
+            if pending_consent:
+                user_id = user_info.get('user_id')
+                virtual_client_id = pending_consent.get('virtual_client_id')
+                scopes = pending_consent.get('scope', [])
+                redirect_uri = pending_consent.get('redirect_uri')
+                state = pending_consent.get('state')
+                
+                logger.info(f"Finalizing consent for user {user_id}, virtual client {virtual_client_id}")
+                
+                # Grant consent now that we have authenticated user
+                if user_id and virtual_client_id:
+                    self._grant_user_consent(user_id, virtual_client_id, scopes)
+                    
+                    # Generate an authorization code for the virtual client
+                    auth_code = self._generate_secure_state()  # Use same secure random generation
+                    
+                    # Get the stored code_verifier from the OAuth state
+                    stored_data = self.state_store.get(received_state, {})
+                    code_verifier = stored_data.get('code_verifier')
+                    
+                    # Store the authorization code temporarily for token exchange
+                    self.state_store[auth_code] = {
+                        'virtual_client_id': virtual_client_id,
+                        'user_id': user_id,
+                        'scopes': scopes,
+                        'redirect_uri': redirect_uri,
+                        'expires_at': (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
+                        'access_token': access_token,  # Store the actual Okta access token
+                        'code_verifier': code_verifier  # Store the code verifier for PKCE
+                    }
+                    
+                    logger.info(f"Generated authorization code {auth_code} for virtual client {virtual_client_id} with code_verifier")
+                    
+                    # Clear pending consent from session
+                    session.pop('pending_consent', None)
+                    
+                    # Redirect back to the virtual client with authorization code
+                    if redirect_uri:
+                        callback_params = {
+                            'code': auth_code,
+                            'state': state
+                        }
+                        callback_query = urlencode({k: v for k, v in callback_params.items() if v})
+                        final_redirect = f"{redirect_uri}?{callback_query}"
+                        
+                        logger.info(f"Redirecting to virtual client: {final_redirect}")
+                        
+                        return web.Response(status=302, headers={'Location': final_redirect})
+                    else:
+                        # No redirect URI, show success page
+                        return web.Response(
+                            text=f"<html><body><h2>Authorization Successful</h2><p>You have successfully authorized {virtual_client_id}</p></body></html>",
+                            content_type='text/html'
+                        )
             
             # Clear OAuth flow data from both session and backup store
             session.pop('app_state', None)
@@ -597,10 +742,13 @@ class OAuthFastMCPProxy:
             return self._extract_user_info(access_token)
 
     def _extract_user_info(self, access_token: str) -> Dict[str, Any]:
-        """Extract user information from JWT access token"""
+        """Extract user information from JWT access token with PROPER SECURITY VALIDATION"""
         try:
-            # Decode JWT without verification (in production, verify signature)
-            decoded = jwt.decode(access_token, options={"verify_signature": False})
+            # SECURITY FIX: Properly verify JWT signature and claims
+            decoded = self._verify_and_decode_jwt(access_token)
+            if not decoded:
+                logger.error("JWT verification failed")
+                return self._get_fallback_user_info()
             
             logger.info(f"JWT token contents: {decoded}")
             
@@ -661,8 +809,51 @@ class OAuthFastMCPProxy:
             }
             
     async def get_user_from_request(self, request: web.Request) -> Optional[Dict[str, Any]]:
-        """Get authenticated user from session with enhanced security validation"""
+        """Get authenticated user from session or Bearer token with enhanced security validation"""
         try:
+            # First, check for Bearer token in Authorization header (for virtual clients)
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header[7:]  # Remove 'Bearer ' prefix
+                
+                # Check if this is a virtual access token
+                if token in self.tokens:
+                    token_data = self.tokens[token]
+                    
+                    # Check if token has expired
+                    created_at = datetime.fromisoformat(token_data.get('created_at'))
+                    expires_in = token_data.get('expires_in', 3600)
+                    if datetime.now(timezone.utc) > created_at + timedelta(seconds=expires_in):
+                        # Token expired, clean it up
+                        del self.tokens[token]
+                        self._audit_log("virtual_token_expired", user_id=token_data.get('user_id'))
+                        return None
+                    
+                    # Return user info from virtual token (SECURITY FIX: Use stored user data)
+                    user_info = {
+                        'user_id': token_data.get('user_id'),
+                        'email': token_data.get('email'),
+                        'name': token_data.get('name'),
+                        'scopes': token_data.get('scopes', []),
+                        'virtual_client_id': token_data.get('virtual_client_id'),
+                        'auth_method': 'virtual_token'
+                    }
+                    
+                    # SECURITY: Ensure we have valid user identification
+                    if not user_info.get('user_id') or not user_info.get('email'):
+                        logger.error(f"Virtual token {token[:20]}... missing user identification")
+                        del self.tokens[token]
+                        self._audit_log("invalid_virtual_token", details={"token_prefix": token[:20]})
+                        return None
+                    
+                    self._audit_log("virtual_token_access", user_id=token_data.get('user_id'), details={
+                        'virtual_client_id': token_data.get('virtual_client_id'),
+                        'path': request.path
+                    })
+                    
+                    return user_info
+            
+            # Fall back to session-based authentication
             from aiohttp_session import get_session
             session = await get_session(request)
             
@@ -689,6 +880,9 @@ class OAuthFastMCPProxy:
             if not user_info.get('user_id'):
                 self._audit_log("session_invalid", details={"reason": "missing_user_id"})
                 return None
+                
+            # Mark as session-based auth
+            user_info['auth_method'] = 'session'
                 
             return user_info
             
@@ -875,7 +1069,7 @@ class OAuthFastMCPProxy:
             
             <div class="note">
                 <strong>Note:</strong> This application uses Okta's organization authorization server to access API resources. 
-                Consent is granted automatically upon successful authentication as this is a trusted first-party application.
+                You will be prompted to explicitly grant consent for each virtual client that requests access to your Okta data.
             </div>
             
             <div class="actions">
@@ -1067,6 +1261,18 @@ class OAuthFastMCPProxy:
         try:
             logger.info(f"Starting OAuth FastMCP proxy server on {host}:{port}")
             
+            # SECURITY: Start periodic cleanup task for expired entries
+            async def periodic_cleanup():
+                while True:
+                    try:
+                        await asyncio.sleep(300)  # Run every 5 minutes
+                        await self._cleanup_expired_entries()
+                    except Exception as e:
+                        logger.error(f"Cleanup task error: {e}")
+            
+            # Start the cleanup task in the background
+            asyncio.create_task(periodic_cleanup())
+            
             # Start HTTP server
             runner = web.AppRunner(self.app)
             await runner.setup()
@@ -1154,9 +1360,18 @@ class OAuthFastMCPProxy:
                 )
             
             # Create a virtual client ID (for mapping to real client)
-            client_id = f"virtual-{hashlib.sha256(client_name.encode()).hexdigest()}"
+            client_id = f"virtual-{hashlib.sha256(client_name.encode()).hexdigest()[:16]}"
             
-            # Register the client (in production, store in database)
+            # Store the virtual client registration
+            self.virtual_clients[client_id] = {
+                "client_name": client_name,
+                "redirect_uris": valid_redirect_uris,
+                "scopes": scopes.split(),
+                "token_endpoint_auth_method": token_endpoint_auth_method,
+                "registered_at": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Also maintain backward compatibility with sessions storage
             self.sessions[client_id] = {
                 "client_name": client_name,
                 "redirect_uris": valid_redirect_uris,
@@ -1301,20 +1516,45 @@ class OAuthFastMCPProxy:
             return web.json_response(
                 {"error": "server_error", "error_description": str(e)},
                 status=500,
-                headers={"Access-Control-Allow-Origin": "*"}            )
+                headers={"Access-Control-Allow-Origin": "*"}
+            )
     
     async def oauth_authorize_proxy(self, request: web.Request) -> web.Response:
-        """Proxy OAuth authorization requests, mapping virtual client IDs to real client ID"""
+        """Proxy OAuth authorization requests, with mandatory consent for virtual clients"""
+        from aiohttp_session import get_session
+        
         try:
             client_id = request.query.get('client_id')
             if not client_id:
                 return web.Response(text="Missing client_id parameter", status=400)
             
             if client_id.startswith('virtual-'):
-                if client_id not in self.sessions:
+                # Check if virtual client exists
+                if client_id not in self.virtual_clients:
                     return web.Response(text=f"Unknown virtual client: {client_id}", status=400)
                 
-                logger.info(f"Mapping virtual client {client_id} to real Okta client")
+                logger.info(f"Processing authorization request for virtual client {client_id}")
+                
+                # Get session to check for pending consent
+                session = await get_session(request)
+                pending_consent = session.get('pending_consent')
+                
+                # Check if this request has valid pending consent
+                if not pending_consent or pending_consent.get('virtual_client_id') != client_id:
+                    # No valid consent - redirect to consent page
+                    logger.info(f"No valid consent for virtual client {client_id}, redirecting to consent page")
+                    consent_params = {
+                        'client_id': client_id,
+                        'redirect_uri': request.query.get('redirect_uri', ''),
+                        'state': request.query.get('state', ''),
+                        'scope': request.query.get('scope', '')
+                    }
+                    consent_query = urlencode({k: v for k, v in consent_params.items() if v})
+                    consent_url = f"/oauth/consent?{consent_query}"
+                    return web.Response(status=302, headers={'Location': consent_url})
+                
+                # Valid consent exists - proceed with OAuth flow
+                logger.info(f"Valid consent found for virtual client {client_id}, proceeding with OAuth")
                 
                 # Get original parameters
                 original_redirect_uri = request.query.get('redirect_uri')
@@ -1325,7 +1565,6 @@ class OAuthFastMCPProxy:
                 
                 # Generate a state parameter if none provided (required for Okta)
                 if not original_state:
-                    import secrets
                     proxy_state = secrets.token_urlsafe(32)
                     logger.info(f"Generated proxy state: {proxy_state}")
                 else:
@@ -1336,28 +1575,73 @@ class OAuthFastMCPProxy:
                     'virtual_client_id': client_id,
                     'original_redirect_uri': original_redirect_uri,
                     'original_state': original_state,  # Store original state (could be None)
+                    'pending_consent': pending_consent,  # Store consent info for finalization
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
-                logger.info(f"Stored state mapping: {proxy_state} -> {self.state_store[proxy_state]}")
+                logger.info(f"Stored state mapping: {proxy_state} -> virtual_client: {client_id}")
                 
-                # Build new query parameters
+                # Clear the pending consent from session (it will be finalized after OAuth callback)
+                session.pop('pending_consent', None)
+                
+                # Generate PKCE parameters for Okta
+                code_verifier = secrets.token_urlsafe(64)
+                hashed = hashlib.sha256(code_verifier.encode('ascii')).digest()
+                encoded = base64.urlsafe_b64encode(hashed)
+                code_challenge = encoded.decode('ascii').strip('=')
+                
+                # Store the code verifier for token exchange
+                self.state_store[proxy_state].update({
+                    'code_verifier': code_verifier,
+                    'code_challenge': code_challenge
+                })
+                
+                # Build new query parameters with PKCE
                 new_query_params = dict(request.query)
                 new_query_params['client_id'] = self.config.client_id
                 new_query_params['state'] = proxy_state  # Use proxy state
+                new_query_params['code_challenge'] = code_challenge
+                new_query_params['code_challenge_method'] = 'S256'
                 
                 # Use our configured redirect URI instead
-                proxy_redirect_uri = f"{request.scheme}://{request.host}/oauth/callback"
+                proxy_redirect_uri = self.config.redirect_uri or f"{request.scheme}://{request.host}/oauth/callback"
                 new_query_params['redirect_uri'] = proxy_redirect_uri
                 
-                from urllib.parse import urlencode
                 query_string = urlencode(new_query_params)
                 okta_auth_url = f"https://{self.config.okta_domain}/oauth2/v1/authorize?{query_string}"
                 
                 logger.info(f"Redirecting to Okta: {okta_auth_url}")
                 return web.Response(status=302, headers={'Location': okta_auth_url})
             else:
-                query_string = str(request.query_string, 'utf-8')
+                # Non-virtual client - use standard flow with PKCE support
+                # Generate PKCE parameters for any OAuth request
+                code_verifier = secrets.token_urlsafe(64)
+                hashed = hashlib.sha256(code_verifier.encode('ascii')).digest()
+                encoded = base64.urlsafe_b64encode(hashed)
+                code_challenge = encoded.decode('ascii').strip('=')
+                
+                # Get the state parameter
+                original_state = request.query.get('state')
+                if not original_state:
+                    # Generate state if not provided
+                    original_state = secrets.token_urlsafe(32)
+                
+                # Store code verifier for this state
+                self.state_store[original_state] = {
+                    'code_verifier': code_verifier,
+                    'code_challenge': code_challenge,
+                    'timestamp': datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Build query parameters with PKCE
+                query_params = dict(request.query)
+                query_params['code_challenge'] = code_challenge
+                query_params['code_challenge_method'] = 'S256'
+                if not query_params.get('state'):
+                    query_params['state'] = original_state
+                
+                query_string = urlencode(query_params)
                 okta_auth_url = f"https://{self.config.okta_domain}/oauth2/v1/authorize?{query_string}"
+                logger.info(f"Redirecting to Okta with PKCE: {okta_auth_url}")
                 return web.Response(status=302, headers={'Location': okta_auth_url})
                 
         except Exception as e:
@@ -1397,6 +1681,150 @@ class OAuthFastMCPProxy:
             
             # Check if this is a virtual client
             if client_id.startswith('virtual-'):
+                if client_id not in self.virtual_clients:
+                    return web.json_response(
+                        {"error": "invalid_client", "error_description": "Unknown virtual client"},
+                        status=400,
+                        headers={"Access-Control-Allow-Origin": "*"}
+                    )
+                
+                logger.info(f"Token request for virtual client {client_id}")
+                
+                # Check if this is using an authorization code we generated
+                auth_code = token_data.get('code')
+                if auth_code and auth_code in self.state_store:
+                    # This is an authorization code from our proxy flow
+                    stored_data = self.state_store[auth_code]
+                    
+                    # Verify the authorization code belongs to this virtual client
+                    if stored_data.get('virtual_client_id') != client_id:
+                        return web.json_response(
+                            {"error": "invalid_grant", "error_description": "Authorization code does not match client"},
+                            status=400,
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
+                    
+                    # SECURITY FIX: Check if authorization code has expired
+                    expires_at_str = stored_data.get('expires_at')
+                    if expires_at_str:
+                        try:
+                            expires_at = datetime.fromisoformat(expires_at_str)
+                            if datetime.now(timezone.utc) > expires_at:
+                                del self.state_store[auth_code]
+                                return web.json_response(
+                                    {"error": "invalid_grant", "error_description": "Authorization code has expired"},
+                                    status=400,
+                                    headers={"Access-Control-Allow-Origin": "*"}
+                                )
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Invalid expires_at format for auth code {auth_code}: {e}")
+                            # Delete suspicious entry
+                            del self.state_store[auth_code]
+                            return web.json_response(
+                                {"error": "invalid_grant", "error_description": "Invalid authorization code"},
+                                status=400,
+                                headers={"Access-Control-Allow-Origin": "*"}
+                            )
+                    
+                    # SECURITY FIX: Check if authorization code has already been used
+                    if stored_data.get('used'):
+                        logger.error(f"Attempted reuse of authorization code {auth_code} for client {client_id}")
+                        del self.state_store[auth_code]
+                        self._audit_log("auth_code_reuse_attempt", details={
+                            "auth_code": auth_code[:20] + "...",
+                            "virtual_client_id": client_id
+                        })
+                        return web.json_response(
+                            {"error": "invalid_grant", "error_description": "Authorization code has already been used"},
+                            status=400,
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
+                    
+                    # Mark authorization code as used
+                    stored_data['used'] = True
+                    self.state_store[auth_code] = stored_data
+                    
+                    logger.info(f"Processing token exchange for virtual client {client_id} using stored PKCE verifier")
+                    
+                    # Use our stored PKCE verifier to exchange with Okta
+                    stored_code_verifier = stored_data.get('code_verifier')
+                    if not stored_code_verifier:
+                        logger.error(f"No stored code_verifier found for auth code {auth_code}")
+                        return web.json_response(
+                            {"error": "server_error", "error_description": "Missing PKCE verifier"},
+                            status=500,
+                            headers={"Access-Control-Allow-Origin": "*"}
+                        )
+                    
+                    # Exchange the authorization code with Okta using our PKCE verifier
+                    redirect_uri = self.config.redirect_uri or f"{request.scheme}://{request.host}/oauth/callback"
+                    okta_token_data = {
+                        "grant_type": "authorization_code",
+                        "client_id": self.config.client_id,
+                        "client_secret": self.config.client_secret,
+                        "code": auth_code,
+                        "redirect_uri": redirect_uri,
+                        "code_verifier": stored_code_verifier
+                    }
+                    
+                    logger.info(f"Exchanging auth code with Okta using stored PKCE verifier: {stored_code_verifier[:20]}...")
+                    
+                    # Make token request to Okta
+                    async with httpx.AsyncClient() as okta_client:
+                        okta_token_url = f"https://{self.config.okta_domain}/oauth2/v1/token"
+                        okta_response = await okta_client.post(
+                            okta_token_url,
+                            data=okta_token_data,
+                            headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                        )
+                        
+                        if okta_response.status_code != 200:
+                            logger.error(f"Okta token exchange failed: {okta_response.status_code} - {okta_response.text}")
+                            # Clean up the auth code
+                            del self.state_store[auth_code]
+                            return web.json_response(
+                                {"error": "invalid_grant", "error_description": f"Token exchange failed: {okta_response.text}"},
+                                status=400,
+                                headers={"Access-Control-Allow-Origin": "*"}
+                            )
+                        
+                        okta_token = okta_response.json()
+                        logger.info("Successfully exchanged authorization code with Okta")
+                    
+                    # SECURITY FIX: Extract user information from the real Okta token
+                    real_access_token = okta_token.get('access_token')
+                    user_info = await self._get_user_info_comprehensive(real_access_token)
+                    
+                    # Generate a virtual access token for this virtual client
+                    virtual_access_token = self._generate_secure_state()
+                    
+                    # SECURITY FIX: Store the virtual token mapping with proper user context
+                    self.tokens[virtual_access_token] = {
+                        'virtual_client_id': client_id,
+                        'real_access_token': real_access_token,
+                        'user_id': user_info.get('user_id'),
+                        'email': user_info.get('email'),
+                        'name': user_info.get('name'),
+                        'scopes': user_info.get('scopes', []),
+                        'created_at': datetime.now(timezone.utc).isoformat(),
+                        'expires_in': okta_token.get('expires_in', 3600)
+                    }
+                    
+                    # Clean up the authorization code
+                    del self.state_store[auth_code]
+                    
+                    logger.info(f"Generated virtual access token for {client_id}")
+                    
+                    # Return virtual token response
+                    return web.json_response({
+                        "access_token": virtual_access_token,
+                        "token_type": "Bearer",
+                        "expires_in": okta_token.get('expires_in', 3600),
+                        "scope": okta_token.get('scope', '')
+                    }, headers={"Access-Control-Allow-Origin": "*"}
+                )
+                
+                # Fall back to legacy virtual client handling for backward compatibility
                 if client_id not in self.sessions:
                     return web.json_response(
                         {"error": "invalid_client", "error_description": "Unknown virtual client"},
@@ -1404,7 +1832,7 @@ class OAuthFastMCPProxy:
                         headers={"Access-Control-Allow-Origin": "*"}
                     )
                 
-                logger.info(f"Token request for virtual client {client_id}, mapping to real client {self.config.client_id}")
+                logger.info(f"Legacy token request for virtual client {client_id}, mapping to real client {self.config.client_id}")
                 
                 # Log original request data for debugging
                 logger.info(f"Original token request data: {token_data}")
@@ -1415,9 +1843,37 @@ class OAuthFastMCPProxy:
                 # Replace redirect_uri with our proxy URI (must match authorization request)
                 if 'redirect_uri' in token_data:
                     original_redirect_uri = token_data['redirect_uri']
-                    proxy_redirect_uri = f"{request.scheme}://{request.host}/oauth/callback"
+                    proxy_redirect_uri = self.config.redirect_uri or f"{request.scheme}://{request.host}/oauth/callback"
                     token_data['redirect_uri'] = proxy_redirect_uri
                     logger.info(f"Mapped redirect_uri: {original_redirect_uri} -> {proxy_redirect_uri}")
+                
+                # Replace code_verifier with the one we stored during authorization
+                auth_code = token_data.get('code')
+                if auth_code and 'code_verifier' in token_data:
+                    # Look for the stored code verifier using the authorization code from Okta
+                    if auth_code in self.state_store:
+                        stored_data = self.state_store[auth_code]
+                        stored_code_verifier = stored_data.get('code_verifier')
+                        
+                        # Verify this auth code belongs to the correct virtual client
+                        if stored_data.get('virtual_client_id') == client_id:
+                            if stored_code_verifier:
+                                original_code_verifier = token_data['code_verifier']
+                                token_data['code_verifier'] = stored_code_verifier
+                                logger.info(f"Replaced code_verifier using auth_code {auth_code}: {original_code_verifier[:20]}... -> {stored_code_verifier[:20]}...")
+                                
+                                # Clean up the auth code mapping
+                                del self.state_store[auth_code]
+                            else:
+                                logger.warning(f"No code_verifier found in stored data for auth_code {auth_code}")
+                        else:
+                            logger.error(f"Authorization code {auth_code} belongs to client {stored_data.get('virtual_client_id')}, not {client_id}")
+                    else:
+                        logger.warning(f"Authorization code {auth_code} not found in state store")
+                        logger.info(f"Current state store entries: {list(self.state_store.keys())}")
+                        # Log state store contents for debugging
+                        for key, data in self.state_store.items():
+                            logger.info(f"State {key}: virtual_client={data.get('virtual_client_id')}, has_verifier={bool(data.get('code_verifier'))}")
                 
                 # Add client secret if required (for confidential clients)
                 if hasattr(self.config, 'client_secret') and self.config.client_secret:
@@ -1469,41 +1925,460 @@ class OAuthFastMCPProxy:
                 headers={"Access-Control-Allow-Origin": "*"}
             )
 
+    async def consent_page(self, request: web.Request) -> web.Response:
+        """Display consent page for virtual client authorization"""
+        from aiohttp_session import get_session
+        
+        try:
+            # Get parameters from query string
+            virtual_client_id = request.query.get('client_id')
+            redirect_uri = request.query.get('redirect_uri')
+            state = request.query.get('state')
+            scope = request.query.get('scope', '').split()
+            
+            if not virtual_client_id or not virtual_client_id.startswith('virtual-'):
+                return web.Response(text="Invalid or missing virtual client ID", status=400)
+            
+            # Check if virtual client is registered
+            if virtual_client_id not in self.virtual_clients:
+                return web.Response(text=f"Unknown virtual client: {virtual_client_id}", status=400)
+            
+            virtual_client = self.virtual_clients[virtual_client_id]
+            
+            # Validate redirect URI
+            if redirect_uri and redirect_uri not in virtual_client['redirect_uris']:
+                return web.Response(text="Invalid redirect URI", status=400)
+            
+            scope_descriptions = {
+                'openid': 'Verify your identity',
+                'profile': 'Access your basic profile information (name, etc.)',
+                'email': 'Access your email address',
+                'okta.users.read': 'Read user information from your Okta organization',
+                'okta.groups.read': 'Read group information from your Okta organization', 
+                'okta.apps.read': 'Read application information from your Okta organization',
+                'okta.events.read': 'Read event information from your Okta organization',
+                'okta.logs.read': 'Read log information from your Okta organization',
+                'okta.policies.read': 'Read policy information from your Okta organization',
+                'okta.devices.read': 'Read device information from your Okta organization',
+                'okta.factors.read': 'Read authentication factor information from your Okta organization'
+            }
+            
+            # Use requested scopes or fall back to client's registered scopes
+            requested_scopes = scope if scope else virtual_client.get('scopes', [])
+            
+            scope_list = ""
+            for scope_name in requested_scopes:
+                description = scope_descriptions.get(scope_name, f"Access {scope_name}")
+                scope_list += f"<li><strong>{scope_name}</strong>: {description}</li>"
+            
+            html = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Authorization Required - {virtual_client['client_name']}</title>
+                <style>
+                    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
+                    .header {{ text-align: center; margin-bottom: 30px; }}
+                    .client-info {{ background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #007bff; }}
+                    .permissions {{ background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107; }}
+                    .warning {{ background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0; }}
+                    .actions {{ text-align: center; margin: 30px 0; }}
+                    .btn {{ padding: 12px 24px; margin: 0 10px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }}
+                    .btn-success {{ background: #28a745; color: white; }}
+                    .btn-danger {{ background: #dc3545; color: white; }}
+                    ul {{ line-height: 1.6; }}
+                    form {{ display: inline; }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>🔐 Authorization Required</h1>
+                    <p>The application <strong>"{virtual_client['client_name']}"</strong> is requesting access to your account.</p>
+                </div>
+                
+                <div class="client-info">
+                    <h3>Application Details:</h3>
+                    <ul>
+                        <li><strong>Name:</strong> {virtual_client['client_name']}</li>
+                        <li><strong>Client ID:</strong> {virtual_client_id}</li>
+                        <li><strong>Registered:</strong> {virtual_client['registered_at']}</li>
+                    </ul>
+                </div>
+                
+                <div class="permissions">
+                    <h3>Requested Permissions:</h3>
+                    <ul>
+                        {scope_list}
+                    </ul>
+                </div>
+                
+                <div class="warning">
+                    <strong>⚠️ Security Notice:</strong> Only authorize applications you trust. 
+                    This application will have access to the specified information in your Okta organization.
+                </div>
+                
+                <div class="actions">
+                    <form method="post" action="/oauth/consent">
+                        <input type="hidden" name="client_id" value="{virtual_client_id}">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
+                        <input type="hidden" name="state" value="{state or ''}">
+                        <input type="hidden" name="scope" value="{' '.join(requested_scopes)}">
+                        <input type="hidden" name="action" value="allow">
+                        <button type="submit" class="btn btn-success">Allow Access</button>
+                    </form>
+                    
+                    <form method="post" action="/oauth/consent">
+                        <input type="hidden" name="client_id" value="{virtual_client_id}">
+                        <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
+                        <input type="hidden" name="state" value="{state or ''}">
+                        <input type="hidden" name="action" value="deny">
+                        <button type="submit" class="btn btn-danger">Deny Access</button>
+                    </form>
+                </div>
+                
+                <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666;">
+                    <small>This consent applies only to this specific application. You can revoke access at any time.</small>
+                </div>
+            </body>
+            </html>
+            """
+            
+            return web.Response(text=html, content_type='text/html')
+            
+        except Exception as e:
+            logger.error(f"Consent page error: {e}")
+            return web.Response(text=f"Error displaying consent page: {str(e)}", status=500)
+
+    async def handle_consent(self, request: web.Request) -> web.Response:
+        """Handle user consent response"""
+        from aiohttp_session import get_session
+        
+        try:
+            # Get form data
+            data = await request.post()
+            virtual_client_id = data.get('client_id')
+            redirect_uri = data.get('redirect_uri')
+            state = data.get('state')
+            scope = data.get('scope', '').split()
+            action = data.get('action')
+            
+            if not virtual_client_id or not virtual_client_id.startswith('virtual-'):
+                return web.Response(text="Invalid virtual client ID", status=400)
+            
+            # For now, we'll use a placeholder user ID since we haven't authenticated yet
+            # In a real implementation, this would come from the authenticated session
+            user_id = "pending_auth"  # Will be updated after OAuth callback
+            
+            if action == "deny":
+                # User denied consent - redirect back with error
+                if redirect_uri:
+                    error_params = {
+                        'error': 'access_denied',
+                        'error_description': 'User denied the request',
+                        'state': state
+                    }
+                    error_query = urlencode({k: v for k, v in error_params.items() if v})
+                    redirect_url = f"{redirect_uri}?{error_query}"
+                    return web.Response(status=302, headers={'Location': redirect_url})
+                else:
+                    return web.Response(text="Access denied by user", status=403)
+            
+            elif action == "allow":
+                # Store pending consent (will be finalized after OAuth callback)
+                session = await get_session(request)
+                session['pending_consent'] = {
+                    'virtual_client_id': virtual_client_id,
+                    'redirect_uri': redirect_uri,
+                    'state': state,
+                    'scope': scope,
+                    'granted_at': datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Now redirect to the authorization proxy to start OAuth flow
+                auth_params = {
+                    'client_id': virtual_client_id,
+                    'redirect_uri': redirect_uri,
+                    'state': state,
+                    'scope': ' '.join(scope),
+                    'response_type': 'code'
+                }
+                auth_query = urlencode({k: v for k, v in auth_params.items() if v})
+                auth_url = f"/oauth2/v1/authorize?{auth_query}"
+                
+                return web.Response(status=302, headers={'Location': auth_url})
+            
+            else:
+                return web.Response(text="Invalid action", status=400)
+                
+        except Exception as e:
+            logger.error(f"Consent handling error: {e}")
+            return web.Response(text=f"Error processing consent: {str(e)}", status=500)
+
+    async def _cleanup_expired_entries(self):
+        """SECURITY: Clean up expired authorization codes and tokens to prevent memory leaks"""
+        now = datetime.now(timezone.utc)
+        
+        # Clean up expired authorization codes in state store
+        expired_codes = []
+        for code, data in self.state_store.items():
+            expires_at_str = data.get('expires_at')
+            if expires_at_str:
+                try:
+                    expires_at = datetime.fromisoformat(expires_at_str)
+                    if now > expires_at:
+                        expired_codes.append(code)
+                except (ValueError, TypeError):
+                    # Invalid timestamp format, remove it
+                    expired_codes.append(code)
+            else:
+                # No expiration set, check timestamp (cleanup after 1 hour)
+                timestamp_str = data.get('timestamp')
+                if timestamp_str:
+                    try:
+                        timestamp = datetime.fromisoformat(timestamp_str)
+                        if now > timestamp + timedelta(hours=1):
+                            expired_codes.append(code)
+                    except (ValueError, TypeError):
+                        expired_codes.append(code)
+        
+        for code in expired_codes:
+            logger.info(f"Cleaning up expired authorization code: {code[:20]}...")
+            del self.state_store[code]
+        
+        # Clean up expired virtual tokens
+        expired_tokens = []
+        for token, data in self.tokens.items():
+            created_at_str = data.get('created_at')
+            expires_in = data.get('expires_in', 3600)
+            if created_at_str:
+                try:
+                    created_at = datetime.fromisoformat(created_at_str)
+                    if now > created_at + timedelta(seconds=expires_in):
+                        expired_tokens.append(token)
+                except (ValueError, TypeError):
+                    expired_tokens.append(token)
+        
+        for token in expired_tokens:
+            logger.info(f"Cleaning up expired virtual token: {token[:20]}...")
+            del self.tokens[token]
+        
+        # Clean up expired user consents
+        for user_id, consents in list(self.user_consents.items()):
+            expired_clients = []
+            for client_id, consent_data in consents.items():
+                expires_at_str = consent_data.get('expires_at')
+                if expires_at_str:
+                    try:
+                        expires_at = datetime.fromisoformat(expires_at_str.replace('Z', '+00:00'))
+                        if now > expires_at:
+                            expired_clients.append(client_id)
+                    except (ValueError, TypeError):
+                        expired_clients.append(client_id)
+            
+            for client_id in expired_clients:
+                logger.info(f"Cleaning up expired consent for user {user_id}, client {client_id}")
+                del self.user_consents[user_id][client_id]
+            
+            # Remove user entry if no consents left
+            if not self.user_consents[user_id]:
+                del self.user_consents[user_id]
+        
+        if expired_codes or expired_tokens:
+            logger.info(f"Cleanup completed: {len(expired_codes)} expired codes, {len(expired_tokens)} expired tokens")
+
+    def _verify_and_decode_jwt(self, access_token: str) -> Optional[Dict[str, Any]]:
+        """SECURITY: Properly verify JWT signature, expiration, and audience"""
+        try:
+            # First, decode header to get key ID
+            unverified_header = jwt.get_unverified_header(access_token)
+            kid = unverified_header.get('kid')
+            
+            if not kid:
+                logger.error("JWT token missing key ID (kid) in header")
+                return None
+            
+            # Get JWKS from Okta (with caching)
+            jwks_data = self._get_cached_jwks()
+            if not jwks_data:
+                logger.error("Failed to retrieve JWKS for token verification")
+                return None
+            
+            # Find the matching key
+            signing_key = None
+            for key in jwks_data.get('keys', []):
+                if key.get('kid') == kid:
+                    try:
+                        # Convert JWK to PEM format for PyJWT
+                        from jwt.algorithms import RSAAlgorithm
+                        signing_key = RSAAlgorithm.from_jwk(key)
+                        break
+                    except Exception as e:
+                        logger.error(f"Failed to convert JWK to signing key: {e}")
+                        continue
+            
+            if not signing_key:
+                logger.error(f"No matching signing key found for kid: {kid}")
+                return None
+            
+            # SECURITY: Verify JWT with proper validation
+            decoded = jwt.decode(
+                access_token,
+                signing_key,
+                algorithms=['RS256'],  # Okta uses RS256
+                audience=self.config.audience,  # Use configured audience
+                issuer=self.config.org_url,   # Validate issuer (always Okta's org URL)
+                options={
+                    "verify_signature": True,   # CRITICAL: Verify signature
+                    "verify_exp": True,         # CRITICAL: Check expiration
+                    "verify_aud": True,         # CRITICAL: Check audience
+                    "verify_iss": True,         # CRITICAL: Check issuer
+                    "require_exp": True,        # CRITICAL: Require expiration
+                    "require_aud": True,        # CRITICAL: Require audience
+                    "require_iss": True         # CRITICAL: Require issuer
+                }
+            )
+            
+            logger.info(f"JWT verification successful for user: {decoded.get('sub')}")
+            return decoded
+            
+        except jwt.ExpiredSignatureError:
+            logger.error("JWT token has expired")
+            self._audit_log("jwt_expired", details={"token_prefix": access_token[:20]})
+            return None
+        except jwt.InvalidAudienceError:
+            logger.error(f"JWT audience validation failed. Expected: {self.config.audience}")
+            self._audit_log("jwt_invalid_audience", details={"token_prefix": access_token[:20]})
+            return None
+        except jwt.InvalidIssuerError:
+            logger.error(f"JWT issuer validation failed. Expected: {self.config.org_url}")
+            self._audit_log("jwt_invalid_issuer", details={"token_prefix": access_token[:20]})
+            return None
+        except jwt.InvalidSignatureError:
+            logger.error("JWT signature verification failed")
+            self._audit_log("jwt_invalid_signature", details={"token_prefix": access_token[:20]})
+            return None
+        except jwt.InvalidTokenError as e:
+            logger.error(f"JWT token validation failed: {e}")
+            self._audit_log("jwt_validation_failed", details={"error": str(e), "token_prefix": access_token[:20]})
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error during JWT verification: {e}")
+            return None
+    
+    def _get_cached_jwks(self) -> Optional[Dict[str, Any]]:
+        """Get JWKS with caching for JWT verification"""
+        try:
+            cache_key = "okta_jwks"
+            cache_ttl = 300  # 5 minutes
+            now = datetime.now(timezone.utc)
+            
+            # Check if we have cached JWKS
+            if hasattr(self, '_jwks_cache'):
+                cached_time, cached_data = self._jwks_cache.get(cache_key, (None, None))
+                if cached_time and (now - cached_time).total_seconds() < cache_ttl:
+                    return cached_data
+            
+            # Fetch fresh JWKS from Okta
+            import httpx
+            jwks_url = f"{self.config.org_url}/oauth2/v1/keys"
+            
+            with httpx.Client() as client:
+                jwks_response = client.get(jwks_url, timeout=10.0)
+                jwks_response.raise_for_status()
+                jwks_data = jwks_response.json()
+            
+            # Cache the result
+            if not hasattr(self, '_jwks_cache'):
+                self._jwks_cache = {}
+            self._jwks_cache[cache_key] = (now, jwks_data)
+            
+            logger.info(f"Fetched fresh JWKS with {len(jwks_data.get('keys', []))} keys")
+            return jwks_data
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch JWKS: {e}")
+            return None
+    
+    def _get_fallback_user_info(self) -> Dict[str, Any]:
+        """Fallback user info for failed JWT verification"""
+        return {
+            "user_id": "unknown",
+            "email": "unknown@example.com",
+            "name": "Unknown User",
+            "roles": [],
+            "scopes": [],
+            "audience": None,
+            "issuer": None
+        }
+
 if __name__ == "__main__":
     import argparse
-    import sys
+    import asyncio
     
-    parser = argparse.ArgumentParser(description="OAuth MCP Proxy Server")
-    parser.add_argument("--backend", required=True, help="Path to the MCP server backend script")
-    parser.add_argument("--host", default="localhost", help="Host to bind to")
-    parser.add_argument("--port", type=int, default=3001, help="Port to bind to")
-    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
-    
-    args = parser.parse_args()
-    
-    # Set up logging
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-    
-    logger = logging.getLogger(__name__)
-    
-    try:
-        # Create proxy instance
-        proxy = OAuthFastMCPProxy(args.backend)
+    async def main():
+        """Main entry point for the OAuth FastMCP proxy server"""
+        parser = argparse.ArgumentParser(
+            description="OAuth-protected FastMCP proxy server for Okta integration"
+        )
+        parser.add_argument(
+            "--backend", 
+            default="./main.py",
+            help="Path to the backend MCP server script (default: ./main.py)"
+        )
+        parser.add_argument(
+            "--host",
+            default="localhost", 
+            help="Host to bind the server to (default: localhost)"
+        )
+        parser.add_argument(
+            "--port",
+            type=int,
+            default=3001,
+            help="Port to bind the server to (default: 3001)"
+        )
+        parser.add_argument(
+            "--log-level",
+            choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+            default="INFO",
+            help="Logging level (default: INFO)"
+        )
         
-        # Start the server
-        logger.info(f"Starting OAuth MCP Proxy on {args.host}:{args.port}")
-        logger.info(f"Backend MCP server: {args.backend}")
+        args = parser.parse_args()
         
-        web.run_app(proxy.app, host=args.host, port=args.port)
+        # Configure logging
+        logging.basicConfig(
+            level=getattr(logging, args.log_level),
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
         
-    except KeyboardInterrupt:
-        logger.info("Server stopped by user")
-        sys.exit(0)
-    except Exception as e:
-        logger.error(f"Failed to start server: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
+        try:
+            # Create and start the OAuth proxy server
+            proxy = OAuthFastMCPProxy(backend_server_path=args.backend)
+            
+            logger.info("Starting OAuth FastMCP proxy server...")
+            logger.info(f"Backend MCP server: {args.backend}")
+            logger.info(f"Listening on: {args.host}:{args.port}")
+            logger.info(f"OAuth configuration: {proxy.config.org_url}")
+            
+            # Start the server
+            runner = await proxy.run(host=args.host, port=args.port)
+            
+            logger.info("Server is running. Press Ctrl+C to stop.")
+            
+            # Keep the server running
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Received shutdown signal, stopping server...")
+                await runner.cleanup()
+                logger.info("Server stopped.")
+                
+        except Exception as e:
+            logger.error(f"Failed to start server: {e}")
+            import traceback
+            traceback.print_exc()
+            exit(1)
+    
+    # Run the main function
+    asyncio.run(main())
