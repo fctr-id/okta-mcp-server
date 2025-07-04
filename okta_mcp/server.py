@@ -1,8 +1,9 @@
-"""Main MCP server implementation for Okta using FastMCP 2.8.1."""
+"""Main MCP server implementation for Okta using FastMCP 2.8.1 with protocol compatibility."""
 
 import os
 import logging
 from fastmcp import FastMCP
+from okta_mcp.compatibility.protocol_adapter import create_compatible_server
 
 logger = logging.getLogger("okta_mcp") 
 
@@ -63,6 +64,11 @@ def create_auth_provider():
 
 def create_server(enable_auth: bool = True):
     """Create and configure the Okta MCP server using FastMCP 2.8.1."""
+    logger.warning("create_server() is deprecated. Use create_compatible_server() for Claude Desktop compatibility.")
+    return _create_server_legacy(enable_auth)
+
+def _create_server_legacy(enable_auth: bool = True):
+    """Legacy server creation (original implementation)."""
     try:
         # Create auth provider if enabled
         auth_provider = create_auth_provider() if enable_auth else None
@@ -150,5 +156,5 @@ def run_with_http(server, host="0.0.0.0", port=3000):
         server.run(transport="streamable-http")
 
 if __name__ == "__main__":
-    server = create_server()
+    server = create_compatible_server()
     run_with_stdio(server)

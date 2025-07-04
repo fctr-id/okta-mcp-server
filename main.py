@@ -80,10 +80,10 @@ def main():
     
     try:
         # Import server module
-        from okta_mcp.server import create_server, run_with_http, run_with_sse, run_with_stdio
+        from okta_mcp.server import create_compatible_server, run_with_http, run_with_sse, run_with_stdio
         
-        # Create server (now with optional auth)
-        server = create_server(enable_auth=not args.no_auth)
+        # Create server with compatibility layer (now with optional auth)
+        server = create_compatible_server(enable_auth=not args.no_auth)
         
         # Determine transport
         if args.http:

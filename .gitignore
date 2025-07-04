@@ -16,3 +16,29 @@ okta_mcp/tools/create_grps.py
 clients/event-stream-monitor.py
 clients/mcp-*.py
 oauth_proxy.log
+
+# Redundant documentation files (keeping locally but not in git)
+docs/oauth-fastmcp-proxy-guide.md
+docs/oauth-configuration-guide.md
+docs/oauth-test-client-guide.md
+docs/oauth/CLEANUP_SUMMARY.md
+docs/oauth/LOGGING_CLEANUP_SUMMARY.md
+docs/oauth/SECURITY_IMPROVEMENTS.md
+docs/oauth/OAUTH_PROXY_README.md
+docs/COMPATIBILITY_IMPLEMENTATION.md
+docs/UNIVERSAL_CLIENT_SUPPORT.md
+docs/MCP-spec-upgrade-README.md
+docs/vscode-mcp-setup.md
+
+# Test scripts (keeping locally but not in git)
+test_*.py
+test_compatibility.py
+test_compatibility_simple.py
+test_oauth_proxy_compatibility.py
+test_universal_client_registration.py
+test_universal_redirect_support.py
+test_401_response.py
+clients/*test*.py
+okta_mcp/oauth_proxy/test_*.py
+.vscode/settings-secure.json
+.vscode/settings.json

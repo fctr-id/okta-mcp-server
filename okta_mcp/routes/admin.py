@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from okta_mcp.tools.tool_registry import ToolRegistry
-from okta_mcp.server import create_server
+from okta_mcp.server import create_compatible_server
 from okta_mcp.utils.okta_client import create_okta_client, OktaMcpClient
 import os
 
@@ -22,7 +22,7 @@ router = APIRouter(
 def get_mcp_server():
     # This could be improved to reference a global server instance
     # instead of creating a new one
-    return create_server()
+    return create_compatible_server()
 
 @router.post("/refresh-tools")
 async def refresh_tools():

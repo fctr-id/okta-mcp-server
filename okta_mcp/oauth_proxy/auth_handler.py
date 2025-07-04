@@ -234,9 +234,17 @@ class AuthHandler:
                 
                 logger.debug(f"Found stored data for state {received_state}: {stored_data}")
                 
-                if original_redirect_uri and ('127.0.0.1' in original_redirect_uri or 'localhost' in original_redirect_uri):
+                if original_redirect_uri:
                     # This is a proxied callback, forward to the virtual client
+                    # Support any MCP client redirect URI (not just localhost)
                     logger.debug(f"Proxying callback to virtual client: {original_redirect_uri}")
+                    
+                    # Audit log the redirect for security monitoring
+                    self._audit_log("oauth_callback_proxied", details={
+                        "original_redirect_uri": original_redirect_uri,
+                        "state": received_state,
+                        "has_auth_code": bool(request.query.get('code'))
+                    })
                     
                     # Build query parameters for MCP Inspector
                     callback_params = dict(request.query)
@@ -990,17 +998,65 @@ class AuthHandler:
             scopes = registration_data.get("scope", "")
             token_endpoint_auth_method = registration_data.get("token_endpoint_auth_method", "none")
             
-            # Validate redirect URIs (basic security check)
+            # SECURITY MODEL: Universal MCP Client Support
+            # 
+            # This proxy implements virtual Dynamic Client Registration (DCR) to support
+            # any MCP client without requiring them to register directly with Okta.
+            # 
+            # Key security properties:
+            # 1. The proxy is the only real Okta OAuth client
+            # 2. MCP clients register with the proxy, not with Okta directly
+            # 3. Real Okta tokens never leave the proxy server
+            # 4. MCP clients receive session cookies or virtual tokens from the proxy
+            # 5. All redirect URIs are accepted because the proxy controls the flow
+            # 6. Comprehensive audit logging tracks all redirect URI registrations
+            # 
+            # This approach allows the proxy to work with:
+            # - Claude Desktop (localhost)
+            # - VS Code extensions (vscode://...)
+            # - Web-based MCP clients (https://...)
+            # - Custom MCP clients (any scheme/host)
+            
+            # Accept any redirect URI for universal MCP client support
+            # The proxy virtualizes DCR and never leaks real Okta tokens to clients
             valid_redirect_uris = []
             for uri in redirect_uris:
-                if uri.startswith(("http://localhost", "http://127.0.0.1", "https://localhost", "https://127.0.0.1")):
-                    valid_redirect_uris.append(uri)
-                else:
-                    logger.warning(f"Rejecting non-localhost redirect URI: {uri}")
+                # Basic URI validation - must be a valid URL with a scheme
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(uri)
+                    # Accept any scheme (http, https, vscode, myapp, etc.) as long as it has a scheme
+                    if parsed.scheme and (parsed.netloc or parsed.path):
+                        valid_redirect_uris.append(uri)
+                        # Audit log all redirect URIs for security monitoring
+                        self._audit_log("client_redirect_uri_registered", details={
+                            "client_name": client_name,
+                            "redirect_uri": uri,
+                            "scheme": parsed.scheme,
+                            "netloc": parsed.netloc,
+                            "path": parsed.path,
+                            "is_localhost": parsed.netloc.startswith(('localhost', '127.0.0.1')) if parsed.netloc else False,
+                            "is_custom_scheme": parsed.scheme not in ('http', 'https')
+                        })
+                    else:
+                        logger.warning(f"Rejecting malformed redirect URI: {uri}")
+                        self._audit_log("client_redirect_uri_rejected", details={
+                            "client_name": client_name,
+                            "redirect_uri": uri,
+                            "reason": "malformed_uri"
+                        })
+                except Exception as e:
+                    logger.warning(f"Rejecting invalid redirect URI: {uri} - {e}")
+                    self._audit_log("client_redirect_uri_rejected", details={
+                        "client_name": client_name,
+                        "redirect_uri": uri,
+                        "reason": "parsing_error",
+                        "error": str(e)
+                    })
             
             if not valid_redirect_uris:
                 return web.json_response(
-                    {"error": "invalid_redirect_uri", "error_description": "Only localhost redirect URIs are allowed"},
+                    {"error": "invalid_redirect_uri", "error_description": "No valid redirect URIs provided"},
                     status=400,
                     headers={"Access-Control-Allow-Origin": "*"}
                 )

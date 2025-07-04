@@ -48,6 +48,12 @@ This release represents a **complete architectural overhaul** with these key imp
 - **🎫 Bearer Tokens**: Full JWT bearer token support with `jwks_uri` validation
 - **🏢 Enterprise Auth**: Support for enterprise authentication flows and scope-based access
 
+### 🔄 **Protocol Compatibility**
+- **🧩 Universal Client Support**: Built-in compatibility layer for Claude Desktop (2025-03-26) and VS Code/MCP Inspector (2025-06-18)
+- **🔍 Automatic Detection**: Automatically detects client protocol version and formats responses accordingly
+- **⚙️ Zero Configuration**: No manual setup required - works out of the box with all MCP clients
+- **📈 Future-Proof**: Ready for protocol evolution while maintaining backward compatibility
+
 ### 🚀 **Future-Ready**
 - **🎯 Sampling Support**: Foundation for advanced request sampling capabilities
 - **🔌 Middleware Ready**: Extensible middleware system for custom processing
@@ -60,6 +66,7 @@ This release represents a **complete architectural overhaul** with these key imp
   - [🛠️ **Enhanced Tools**](#️-enhanced-tools)
   - [🌐 **Unified Client**](#-unified-client)
   - [🔐 **Advanced Security**](#-advanced-security)
+  - [🔄 **Protocol Compatibility**](#-protocol-compatibility)
   - [🚀 **Future-Ready**](#-future-ready)
 - [📋 Table of Contents](#-table-of-contents)
 - [🔍 What is the Model Context Protocol?](#-what-is-the-model-context-protocol)
