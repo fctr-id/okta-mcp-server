@@ -39,9 +39,16 @@ class OAuthConfig:
     
     def __post_init__(self):
         """Generate OAuth endpoints from org URL"""
+        logger.debug(f"Validating OAuth config:")
+        logger.debug(f"  org_url: '{self.org_url}'")
+        logger.debug(f"  require_https: {self.require_https}")
+        logger.debug(f"  org_url.startswith('https://'): {self.org_url.startswith('https://')}")
+        
         # Allow HTTP for local development (localhost)
         if not self.org_url.startswith("https://"):
+            logger.debug(f"URL does not start with https://, checking HTTPS requirements...")
             if self.require_https and not ("localhost" in self.org_url or "127.0.0.1" in self.org_url):
+                logger.error(f"HTTPS required but org_url '{self.org_url}' is not HTTPS and not localhost")
                 raise ValueError("HTTPS required for OAuth endpoints (except localhost)")
         
         # Use ORG authorization server for Okta API scopes (not default)
@@ -69,13 +76,23 @@ class OAuthConfig:
         """Create OAuth config from environment variables"""
         try:
             # Support both new and legacy environment variable names
+            org_url = os.getenv("OKTA_ORG_URL") or os.getenv("OKTA_CLIENT_ORGURL", "")
+            require_https = os.getenv("OAUTH_REQUIRE_HTTPS", "true").lower() == "true"
+            
+            logger.debug(f"Loading OAuth config from environment:")
+            logger.debug(f"  OKTA_ORG_URL: {os.getenv('OKTA_ORG_URL')}")
+            logger.debug(f"  OKTA_CLIENT_ORGURL: {os.getenv('OKTA_CLIENT_ORGURL')}")
+            logger.debug(f"  Final org_url: {org_url}")
+            logger.debug(f"  OAUTH_REQUIRE_HTTPS: {os.getenv('OAUTH_REQUIRE_HTTPS')}")
+            logger.debug(f"  Final require_https: {require_https}")
+            
             config = cls(
                 client_id=os.getenv("OKTA_CLIENT_ID") or os.getenv("OKTA_OAUTH_CLIENT_ID", ""),
                 client_secret=os.getenv("OKTA_CLIENT_SECRET") or os.getenv("OKTA_OAUTH_CLIENT_SECRET", ""),
-                org_url=os.getenv("OKTA_ORG_URL") or os.getenv("OKTA_CLIENT_ORGURL", ""),
+                org_url=org_url,
                 audience=os.getenv("OKTA_OAUTH_AUDIENCE", "fctrid-okta-mcp-server"),  # Updated default
                 redirect_uri=os.getenv("OAUTH_REDIRECT_URI", "http://localhost:3001/oauth/callback"),
-                require_https=os.getenv("OAUTH_REQUIRE_HTTPS", "true").lower() == "true"
+                require_https=require_https
             )
             
             # Override default scopes if specified
