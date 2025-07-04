@@ -76,7 +76,7 @@ class OAuthFastMCPProxy:
             domain=None,
             max_age=7200,  # 2 hours
             path='/',
-            secure=False,  # Set to True in production with HTTPS
+            secure=self.config.require_https,  # Use OAUTH_REQUIRE_HTTPS setting
             httponly=True,  # Prevent XSS access to session cookie
             samesite='Lax'
         )
