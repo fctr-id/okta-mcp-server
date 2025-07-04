@@ -9,6 +9,7 @@ Use this to test the compatibility layer with real MCP clients.
 import os
 import sys
 import logging
+import asyncio
 from dotenv import load_dotenv
 
 # Set up logging
@@ -75,7 +76,7 @@ def main():
         logger.info("=" * 60)
         
         # Start the OAuth proxy server
-        oauth_main()
+        asyncio.run(oauth_main())
         
     except KeyboardInterrupt:
         logger.info("🛑 Server stopped by user")

@@ -16,8 +16,8 @@ logger = logging.getLogger("oauth_proxy.mcp")
 class MCPHandler:
     """Handles MCP protocol endpoints with OAuth protection"""
     
-    def __init__(self, mcp_proxy, auth_handler):
-        self.mcp_proxy = mcp_proxy  # FastMCP proxy instance
+    def __init__(self, mcp_server, auth_handler):
+        self.mcp_server = mcp_server  # Direct FastMCP server instance
         self.auth_handler = auth_handler
         
     async def handle_post_root(self, request: web.Request) -> web.Response:
@@ -82,9 +82,22 @@ class MCPHandler:
             return create_401_response(request, "Authentication required to access MCP tools")
             
         try:
-            # Get tools from FastMCP proxy
-            tools = await self.mcp_proxy.list_tools()
-            tools_data = [tool.model_dump() if hasattr(tool, 'model_dump') else {"name": str(tool)} for tool in tools]
+            # Get tools from direct FastMCP server
+            tools = await self.mcp_server.get_tools()
+            tools_data = []
+            
+            # Convert tools to a serializable format
+            for tool_name, tool in tools.items():
+                if hasattr(tool, 'model_dump'):
+                    tools_data.append(tool.model_dump())
+                elif hasattr(tool, 'to_dict'):
+                    tools_data.append(tool.to_dict())
+                else:
+                    # Basic tool info
+                    tools_data.append({
+                        "name": tool_name,
+                        "description": getattr(tool, 'description', f"Tool: {tool_name}")
+                    })
             
             audit_log("mcp_tools_accessed", user_id=user_info.get("user_id"), details={
                 "tool_count": len(tools_data),

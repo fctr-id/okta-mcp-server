@@ -32,6 +32,7 @@ if __name__ == "__main__":
 from okta_mcp.auth.oauth_provider import OAuthConfig
 from okta_mcp.oauth_proxy.utils import generate_secure_session_key, setup_logging
 from okta_mcp.oauth_proxy.auth_handler import AuthHandler
+from okta_mcp.oauth_proxy.ui_handlers import UIHandlers
 from okta_mcp.oauth_proxy.mcp_handler import MCPHandler
 from okta_mcp.oauth_proxy.discovery_handler import DiscoveryHandler
 
@@ -45,13 +46,20 @@ class OAuthFastMCPProxy:
         self.backend_server_path = backend_server_path
         self.config = OAuthConfig.from_environment()
         
+        # Resolve backend path relative to project root if it's a relative path
+        if not os.path.isabs(backend_server_path) and backend_server_path.startswith('./'):
+            # Get project root (3 levels up from this file)
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            self.backend_server_path = os.path.join(project_root, backend_server_path[2:])  # Remove './'
+        
         # Create handlers
         self.auth_handler = AuthHandler(self.config)
+        self.ui_handlers = UIHandlers(self.auth_handler)
         
         # Create FastMCP proxy
         from fastmcp import FastMCP
         self.mcp_proxy = FastMCP.as_proxy(
-            backend_server_path,
+            self.backend_server_path,
             name="OktaOAuthMCPProxy"
         )
         
@@ -141,9 +149,9 @@ class OAuthFastMCPProxy:
                                  self.discovery_handler.oauth_jwks_proxy)
         
         # OAuth authentication routes
-        self.app.router.add_get('/oauth/permissions', self.auth_handler.permissions_info)
-        self.app.router.add_get('/oauth/consent', self.auth_handler.consent_page)
-        self.app.router.add_post('/oauth/consent', self.auth_handler.handle_consent)
+        self.app.router.add_get('/oauth/permissions', self.ui_handlers.permissions_info)
+        self.app.router.add_get('/oauth/consent', self.ui_handlers.consent_page)
+        self.app.router.add_post('/oauth/consent', self.ui_handlers.handle_consent)
         self.app.router.add_get('/oauth/login', self.auth_handler.oauth_login)
         self.app.router.add_get('/oauth/callback', self.auth_handler.oauth_callback)
         self.app.router.add_get('/oauth/status', self.auth_handler.oauth_status)
@@ -170,6 +178,16 @@ class OAuthFastMCPProxy:
         self.app.router.add_get("/mcp/resources", self.mcp_handler.protected_mcp_resources)
         self.app.router.add_post("/mcp/resources/read", self.mcp_handler.protected_mcp_read_resource)
         self.app.router.add_get("/mcp/prompts", self.mcp_handler.protected_mcp_prompts)
+        
+        # Static file serving for images
+        # Resolve images path relative to project root
+        if not os.path.isabs('./images/'):
+            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+            images_path = os.path.join(project_root, 'images')
+        else:
+            images_path = './images/'
+        
+        self.app.router.add_static('/images/', path=images_path, name='images')
     
     async def _home(self, request: web.Request) -> web.Response:
         """Home page with OAuth status and MCP info"""

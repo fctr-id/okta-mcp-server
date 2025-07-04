@@ -27,8 +27,9 @@ logger = logging.getLogger("oauth_proxy.auth")
 class AuthHandler:
     """Handles OAuth authentication flows and JWT validation"""
     
-    def __init__(self, config: OAuthConfig):
-        self.config = config
+    def __init__(self, oauth_provider: OAuthConfig):
+        self.oauth_provider = oauth_provider
+        self.config = oauth_provider  # Backward compatibility
         self.state_store: Dict[str, Any] = {}  # In-memory state storage
         self.virtual_clients: Dict[str, VirtualClient] = {}  # Virtual client registry
         self.authorization_codes: Dict[str, AuthorizationCode] = {}  # Auth codes
@@ -224,15 +225,28 @@ class AuthHandler:
         try:
             # Check if this is a proxied callback for MCP Inspector
             received_state = request.query.get("state")
-            logger.debug(f"Callback received with state: {received_state}")
-            logger.debug(f"State store contents: {list(self.state_store.keys())}")
+            auth_code = request.query.get("code")
+            user_agent = request.headers.get("User-Agent", "")
+            remote_ip = request.remote
+            
+            # Enhanced logging for client identification and flow tracking
+            logger.info(f"🔄 OAuth callback received - State: {received_state[:10]}..., "
+                       f"Auth Code: {'✓' if auth_code else '✗'}, "
+                       f"User-Agent: {user_agent[:50]}..., "
+                       f"IP: {remote_ip}")
+            
+            logger.debug(f"Full callback details - State: {received_state}, "
+                        f"User-Agent: {user_agent}, Query params: {dict(request.query)}")
             
             if received_state and received_state in self.state_store:
                 stored_data = self.state_store[received_state]
                 original_redirect_uri = stored_data.get('original_redirect_uri')
                 original_state = stored_data.get('original_state')
+                virtual_client_id = stored_data.get('virtual_client_id')
                 
-                logger.debug(f"Found stored data for state {received_state}: {stored_data}")
+                logger.info(f"📱 Virtual client callback detected - "
+                           f"Client ID: {virtual_client_id}, "
+                           f"Target: {original_redirect_uri}")
                 
                 if original_redirect_uri:
                     # This is a proxied callback, forward to the virtual client
@@ -362,6 +376,8 @@ class AuthHandler:
                 access_token = token_response["access_token"]
                 user_info = await self._get_user_info_comprehensive(access_token)
                 
+                logger.info("Successfully exchanged authorization code for access token")
+                
                 # Store user information in session
                 session["authenticated"] = True
                 session["access_token"] = access_token
@@ -440,263 +456,18 @@ class AuthHandler:
             logger.error(f"OAuth logout failed: {e}")
             return web.json_response({"error": str(e)}, status=500)
 
+    # UI methods moved to ui_handlers.py - delegate there
     async def permissions_info(self, request: web.Request) -> web.Response:
-        """Display information about permissions requested"""
-        scopes = self.config.default_scopes
-        
-        scope_descriptions = {
-            'openid': 'Verify your identity',
-            'profile': 'Access your basic profile information (name, etc.)',
-            'email': 'Access your email address',
-            'okta.users.read': 'Read user information from your Okta organization',
-            'okta.groups.read': 'Read group information from your Okta organization', 
-            'okta.apps.read': 'Read application information from your Okta organization',
-            'okta.events.read': 'Read event information from your Okta organization',
-            'okta.logs.read': 'Read log information from your Okta organization',
-            'okta.policies.read': 'Read policy information from your Okta organization',
-            'okta.devices.read': 'Read device information from your Okta organization',
-            'okta.factors.read': 'Read authentication factor information from your Okta organization'
-        }
-        
-        scope_list = ""
-        for scope in scopes:
-            description = scope_descriptions.get(scope, f"Access {scope}")
-            scope_list += f"<li><strong>{scope}</strong>: {description}</li>"
-        
-        html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>OAuth Permissions - Okta MCP Server</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
-                .header {{ text-align: center; margin-bottom: 30px; }}
-                .permissions {{ background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0; }}
-                .note {{ background: #e7f3ff; padding: 15px; border-left: 4px solid #2196F3; margin: 20px 0; }}
-                .actions {{ text-align: center; margin: 30px 0; }}
-                .btn {{ padding: 12px 24px; margin: 0 10px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }}
-                .btn-primary {{ background: #007bff; color: white; }}
-                .btn-secondary {{ background: #6c757d; color: white; }}
-                ul {{ line-height: 1.6; }}
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h1>🔐 OAuth Permissions</h1>
-                <p>The Okta MCP Server is requesting the following permissions:</p>
-            </div>
-            
-            <div class="permissions">
-                <h3>Requested Permissions:</h3>
-                <ul>
-                    {scope_list}
-                </ul>
-            </div>
-            
-            <div class="note">
-                <strong>Note:</strong> This application uses Okta's organization authorization server to access API resources. 
-                You will be prompted to explicitly grant consent for each virtual client that requests access to your Okta data.
-            </div>
-            
-            <div class="actions">
-                <a href="/oauth/login" class="btn btn-primary">Continue to Login</a>
-                <a href="/" class="btn btn-secondary">Cancel</a>
-            </div>
-            
-            <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666;">
-                <small>For more information about OAuth security, see our <a href="/docs">documentation</a>.</small>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return web.Response(text=html, content_type="text/html")
-
-    async def consent_page(self, request: web.Request) -> web.Response:
-        """Display consent page for virtual client authorization"""
-        from aiohttp_session import get_session
-        
-        try:
-            # Get parameters from query string
-            virtual_client_id = request.query.get('client_id')
-            redirect_uri = request.query.get('redirect_uri')
-            state = request.query.get('state')
-            scope = request.query.get('scope', '').split()
-            
-            if not virtual_client_id or not virtual_client_id.startswith('virtual-'):
-                return web.Response(text="Invalid or missing virtual client ID", status=400)
-            
-            # Check if virtual client is registered
-            if virtual_client_id not in self.virtual_clients:
-                return web.Response(text=f"Unknown virtual client: {virtual_client_id}", status=400)
-            
-            virtual_client = self.virtual_clients[virtual_client_id]
-            
-            # Validate redirect URI
-            if redirect_uri and redirect_uri not in virtual_client['redirect_uris']:
-                return web.Response(text="Invalid redirect URI", status=400)
-            
-            scope_descriptions = {
-                'openid': 'Verify your identity',
-                'profile': 'Access your basic profile information (name, etc.)',
-                'email': 'Access your email address',
-                'okta.users.read': 'Read user information from your Okta organization',
-                'okta.groups.read': 'Read group information from your Okta organization', 
-                'okta.apps.read': 'Read application information from your Okta organization',
-                'okta.events.read': 'Read event information from your Okta organization',
-                'okta.logs.read': 'Read log information from your Okta organization',
-                'okta.policies.read': 'Read policy information from your Okta organization',
-                'okta.devices.read': 'Read device information from your Okta organization',
-                'okta.factors.read': 'Read authentication factor information from your Okta organization'
-            }
-            
-            # Use requested scopes or fall back to client's registered scopes
-            requested_scopes = scope if scope else virtual_client.get('scopes', [])
-            
-            scope_list = ""
-            for scope_name in requested_scopes:
-                description = scope_descriptions.get(scope_name, f"Access {scope_name}")
-                scope_list += f"<li><strong>{scope_name}</strong>: {description}</li>"
-            
-            html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>Authorization Required - {virtual_client['client_name']}</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }}
-                    .header {{ text-align: center; margin-bottom: 30px; }}
-                    .client-info {{ background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #007bff; }}
-                    .permissions {{ background: #fff3cd; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #ffc107; }}
-                    .warning {{ background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0; }}
-                    .actions {{ text-align: center; margin: 30px 0; }}
-                    .btn {{ padding: 12px 24px; margin: 0 10px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }}
-                    .btn-success {{ background: #28a745; color: white; }}
-                    .btn-danger {{ background: #dc3545; color: white; }}
-                    ul {{ line-height: 1.6; }}
-                    form {{ display: inline; }}
-                </style>
-            </head>
-            <body>
-                <div class="header">
-                    <h1>🔐 Authorization Required</h1>
-                    <p>The application <strong>"{virtual_client['client_name']}"</strong> is requesting access to your account.</p>
-                </div>
-                
-                <div class="client-info">
-                    <h3>Application Details:</h3>
-                    <ul>
-                        <li><strong>Name:</strong> {virtual_client['client_name']}</li>
-                        <li><strong>Client ID:</strong> {virtual_client_id}</li>
-                        <li><strong>Registered:</strong> {virtual_client['registered_at']}</li>
-                    </ul>
-                </div>
-                
-                <div class="permissions">
-                    <h3>Requested Permissions:</h3>
-                    <ul>
-                        {scope_list}
-                    </ul>
-                </div>
-                
-                <div class="warning">
-                    <strong>⚠️ Security Notice:</strong> Only authorize applications you trust. 
-                    This application will have access to the specified information in your Okta organization.
-                </div>
-                
-                <div class="actions">
-                    <form method="post" action="/oauth/consent">
-                        <input type="hidden" name="client_id" value="{virtual_client_id}">
-                        <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
-                        <input type="hidden" name="state" value="{state or ''}">
-                        <input type="hidden" name="scope" value="{' '.join(requested_scopes)}">
-                        <input type="hidden" name="action" value="allow">
-                        <button type="submit" class="btn btn-success">Allow Access</button>
-                    </form>
-                    
-                    <form method="post" action="/oauth/consent">
-                        <input type="hidden" name="client_id" value="{virtual_client_id}">
-                        <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
-                        <input type="hidden" name="state" value="{state or ''}">
-                        <input type="hidden" name="action" value="deny">
-                        <button type="submit" class="btn btn-danger">Deny Access</button>
-                    </form>
-                </div>
-                
-                <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; text-align: center; color: #666;">
-                    <small>This consent applies only to this specific application. You can revoke access at any time.</small>
-                </div>
-            </body>
-            </html>
-            """
-            
-            return web.Response(text=html, content_type='text/html')
-            
-        except Exception as e:
-            logger.error(f"Consent page error: {e}")
-            return web.Response(text=f"Error displaying consent page: {str(e)}", status=500)
+        """Delegate to UI handlers"""
+        from .ui_handlers import UIHandlers
+        ui_handlers = UIHandlers(self)
+        return await ui_handlers.permissions_info(request)
 
     async def handle_consent(self, request: web.Request) -> web.Response:
-        """Handle user consent response"""
-        from aiohttp_session import get_session
-        from urllib.parse import urlencode
-        
-        try:
-            # Get form data
-            data = await request.post()
-            virtual_client_id = data.get('client_id')
-            redirect_uri = data.get('redirect_uri')
-            state = data.get('state')
-            scope = data.get('scope', '').split()
-            action = data.get('action')
-            
-            if not virtual_client_id or not virtual_client_id.startswith('virtual-'):
-                return web.Response(text="Invalid virtual client ID", status=400)
-            
-            if action == "deny":
-                # User denied consent - redirect back with error
-                if redirect_uri:
-                    error_params = {
-                        'error': 'access_denied',
-                        'error_description': 'User denied the request',
-                        'state': state
-                    }
-                    error_query = urlencode({k: v for k, v in error_params.items() if v})
-                    redirect_url = f"{redirect_uri}?{error_query}"
-                    return web.Response(status=302, headers={'Location': redirect_url})
-                else:
-                    return web.Response(text="Access denied by user", status=403)
-            
-            elif action == "allow":
-                # Store pending consent (will be finalized after OAuth callback)
-                session = await get_session(request)
-                session['pending_consent'] = {
-                    'virtual_client_id': virtual_client_id,
-                    'redirect_uri': redirect_uri,
-                    'state': state,
-                    'scope': scope,
-                    'granted_at': datetime.now(timezone.utc).isoformat()
-                }
-                
-                # Now redirect to the authorization proxy to start OAuth flow
-                auth_params = {
-                    'client_id': virtual_client_id,
-                    'redirect_uri': redirect_uri,
-                    'state': state,
-                    'scope': ' '.join(scope),
-                    'response_type': 'code'
-                }
-                auth_query = urlencode({k: v for k, v in auth_params.items() if v})
-                auth_url = f"/oauth2/v1/authorize?{auth_query}"
-                
-                return web.Response(status=302, headers={'Location': auth_url})
-            
-            else:
-                return web.Response(text="Invalid action", status=400)
-                
-        except Exception as e:
-            logger.error(f"Consent handling error: {e}")
-            return web.Response(text=f"Error processing consent: {str(e)}", status=500)
+        """Delegate to UI handlers"""
+        from .ui_handlers import UIHandlers
+        ui_handlers = UIHandlers(self)
+        return await ui_handlers.handle_consent(request)
 
     async def _get_user_info_comprehensive(self, access_token: str) -> Dict[str, Any]:
         """Get comprehensive user information from both JWT token and UserInfo endpoint"""
@@ -1117,17 +888,31 @@ class AuthHandler:
         
         try:
             client_id = request.query.get('client_id')
+            redirect_uri = request.query.get('redirect_uri', '')
+            scope = request.query.get('scope', '')
+            state = request.query.get('state', '')
+            user_agent = request.headers.get("User-Agent", "")
+            
+            # Enhanced logging for authorization flow
+            logger.info(f"🚀 OAuth authorization request - "
+                       f"Client ID: {client_id}, "
+                       f"User-Agent: {user_agent[:50]}..., "
+                       f"Target: {redirect_uri}, "
+                       f"Scopes: {len(scope.split()) if scope else 0}")
+            
+            logger.debug(f"Authorization details - Redirect: {redirect_uri}, "
+                        f"State: {state[:10]}... if state else 'None', "
+                        f"Full scope: {scope}")
+            
             if not client_id:
+                logger.warning(f"Missing client_id parameter from {redirect_uri}")
                 return web.Response(text="Missing client_id parameter", status=400)
             
             if client_id.startswith('virtual-'):
                 # Check if virtual client exists, if not, auto-register it
                 if client_id not in self.virtual_clients:
-                    # Auto-register virtual client for VS Code and similar MCP clients
-                    redirect_uri = request.query.get('redirect_uri', '')
-                    scope = request.query.get('scope', 'openid profile email')
-                    
-                    logger.debug(f"Auto-registering virtual client {client_id} with redirect_uri: {redirect_uri}")
+                    logger.info(f"📝 Auto-registering virtual client - "
+                               f"ID: {client_id}")
                     
                     # Create virtual client entry
                     self.virtual_clients[client_id] = {
@@ -1148,11 +933,9 @@ class AuthHandler:
                         "auto_registered": True
                     }
                     
-                    logger.debug(f"Successfully auto-registered virtual client: {client_id}")
+                    logger.debug(f"✅ Successfully auto-registered virtual client: {client_id}")
                 else:
-                    logger.debug(f"Virtual client {client_id} already registered")
-                
-                logger.debug(f"Processing authorization request for virtual client {client_id}")
+                    logger.debug(f"📋 Virtual client {client_id} already registered")
                 
                 # Get session to check for pending consent
                 session = await get_session(request)
@@ -1161,19 +944,26 @@ class AuthHandler:
                 # Check if this request has valid pending consent
                 if not pending_consent or pending_consent.get('virtual_client_id') != client_id:
                     # No valid consent - redirect to consent page
-                    logger.debug(f"No valid consent for virtual client {client_id}, redirecting to consent page")
+                    logger.info(f"🔐 Consent required - "
+                               f"ID: {client_id}, "
+                               f"Reason: {'No consent' if not pending_consent else 'Different client'}")
+                    
                     consent_params = {
                         'client_id': client_id,
-                        'redirect_uri': request.query.get('redirect_uri', ''),
-                        'state': request.query.get('state', ''),
-                        'scope': request.query.get('scope', '')
+                        'redirect_uri': redirect_uri,
+                        'state': state,
+                        'scope': scope
                     }
                     consent_query = urlencode({k: v for k, v in consent_params.items() if v})
                     consent_url = f"/oauth/consent?{consent_query}"
+                    
+                    logger.debug(f"Redirecting to consent page: {consent_url}")
                     return web.Response(status=302, headers={'Location': consent_url})
                 
                 # Valid consent exists - proceed with OAuth flow
-                logger.debug(f"Valid consent found for virtual client {client_id}, proceeding with OAuth")
+                logger.info(f"✅ Consent verified - "
+                           f"ID: {client_id}, "
+                           f"Proceeding to Okta authorization")
                 
                 # Get original parameters
                 original_redirect_uri = request.query.get('redirect_uri')
