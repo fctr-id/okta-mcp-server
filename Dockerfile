@@ -23,6 +23,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Explicitly ensure images directory exists and is copied
+COPY images/ ./images/
+
+# Verify images directory exists (for debugging)
+RUN ls -la /app/images/
+
 # Set common environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -57,4 +63,4 @@ ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iu
 FROM base AS oauth-proxy
 ENV TRANSPORT_TYPE=oauth-proxy
 EXPOSE 3001
-ENTRYPOINT ["python", "okta_mcp/oauth_proxy/server.py", "--backend=main.py", "--host=0.0.0.0", "--port=3001"]
+ENTRYPOINT ["python", "okta_mcp/oauth_proxy/server.py", "--host=0.0.0.0", "--port=3001"]
