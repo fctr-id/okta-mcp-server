@@ -151,6 +151,7 @@ class OAuthFastMCPProxy:
         
         # Dynamic Client Registration endpoint (for MCP Inspector etc.)
         self.app.router.add_post('/oauth2/v1/clients', self.auth_handler.oauth_register_client)
+        self.app.router.add_get('/oauth2/v1/clients', self.auth_handler.oauth_register_client)
         self.app.router.add_options('/oauth2/v1/clients', self.auth_handler.oauth_register_client)
         
         # Authorization and token endpoint proxies

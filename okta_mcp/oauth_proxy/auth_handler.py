@@ -950,11 +950,33 @@ class AuthHandler:
                 status=200,
                 headers={
                     "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                     "Access-Control-Allow-Headers": "Content-Type, Authorization"
                 }
             )
         
+        # Handle GET requests (for client lookup or discovery)
+        if request.method == "GET":
+            try:
+                # For MCP clients doing discovery, return a simple response indicating registration is available
+                return web.json_response(
+                    {
+                        "registration_endpoint": f"{request.scheme}://{request.host}/oauth2/v1/clients",
+                        "supported_methods": ["POST"],
+                        "description": "Dynamic Client Registration endpoint"
+                    },
+                    status=200,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+            except Exception as e:
+                logger.error(f"Client lookup failed: {e}")
+                return web.json_response(
+                    {"error": str(e)}, 
+                    status=500,
+                    headers={"Access-Control-Allow-Origin": "*"}
+                )
+        
+        # Handle POST requests (actual registration)
         try:
             # Get registration request
             registration_data = await request.json()

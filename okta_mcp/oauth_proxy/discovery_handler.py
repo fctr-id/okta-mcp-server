@@ -4,10 +4,12 @@ Discovery Handler for OAuth Proxy Server
 Handles OAuth 2.0 discovery endpoints and well-known URIs.
 """
 
+import os
 import logging
 import httpx
 from typing import Dict, Any
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 from aiohttp import web
 
 from okta_mcp.auth.oauth_provider import OAuthConfig
@@ -21,6 +23,32 @@ class DiscoveryHandler:
     def __init__(self, config):
         self.config = config
         self._jwks_cache = {}  # Simple in-memory cache for JWKS
+        
+    def _get_base_url(self, request: web.Request) -> str:
+        """
+        Determine the base URL for discovery endpoints based on OAUTH_REDIRECT_URI.
+        If OAUTH_REDIRECT_URI uses HTTPS, force HTTPS for all discovery URLs.
+        Otherwise, use the request's original scheme.
+        """
+        redirect_uri = os.getenv("OAUTH_REDIRECT_URI", "")
+        
+        if redirect_uri:
+            # Parse the redirect URI to get the scheme
+            parsed = urlparse(redirect_uri)
+            if parsed.scheme == "https":
+                # Force HTTPS for all discovery URLs
+                return f"https://{request.host}"
+        
+        # Fallback to original request scheme (with proxy header detection)
+        original_scheme = request.scheme
+        
+        # Check for common proxy headers that indicate original scheme was HTTPS
+        if (request.headers.get('X-Forwarded-Proto') == 'https' or
+            request.headers.get('X-Forwarded-Scheme') == 'https' or 
+            request.headers.get('X-Original-Proto') == 'https'):
+            original_scheme = 'https'
+        
+        return f"{original_scheme}://{request.host}"
         
     async def oauth_protected_resource_metadata(self, request: web.Request) -> web.Response:
         """OAuth 2.0 Protected Resource Metadata (RFC 9728)"""
@@ -36,7 +64,7 @@ class DiscoveryHandler:
             )
         
         try:
-            base_url = f"{request.scheme}://{request.host}"
+            base_url = self._get_base_url(request)
             
             metadata = {
                 "resource": base_url,
@@ -98,7 +126,7 @@ class DiscoveryHandler:
             
             if okta_metadata:
                 # Replace key endpoints with our proxy endpoints where we have proxies
-                base_url = f"{request.scheme}://{request.host}"
+                base_url = self._get_base_url(request)
                 okta_metadata["authorization_endpoint"] = f"{base_url}/oauth2/v1/authorize"
                 okta_metadata["token_endpoint"] = f"{base_url}/oauth2/v1/token"
                 okta_metadata["registration_endpoint"] = f"{base_url}/oauth2/v1/clients"
@@ -112,8 +140,9 @@ class DiscoveryHandler:
             
         except Exception as e:
             logger.error(f"Error fetching Okta metadata: {e}")
+            
             # Fallback metadata with our proxy endpoints where available
-            base_url = f"{request.scheme}://{request.host}"
+            base_url = self._get_base_url(request)
             fallback_metadata = {
                 "issuer": self.config.org_url,
                 "authorization_endpoint": f"{base_url}/oauth2/v1/authorize",
