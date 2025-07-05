@@ -33,7 +33,6 @@ from okta_mcp.auth.oauth_provider import OAuthConfig
 from okta_mcp.oauth_proxy.utils import generate_secure_session_key, setup_logging
 from okta_mcp.oauth_proxy.auth_handler import AuthHandler
 from okta_mcp.oauth_proxy.ui_handlers import UIHandlers
-from okta_mcp.oauth_proxy.mcp_handler import MCPHandler
 from okta_mcp.oauth_proxy.discovery_handler import DiscoveryHandler
 from okta_mcp.oauth_proxy.simple_oauth_mcp_handler import OAuthMCPHandler
 
@@ -60,15 +59,13 @@ class OAuthFastMCPProxy:
         # Create OAuth-aware FastMCP server for /oauth_mcp endpoint
         self.oauth_fastmcp_server = None  # Will be initialized asynchronously
         
-        # Create FastMCP proxy for backward compatibility/legacy endpoints
-        from fastmcp import FastMCP
-        self.mcp_proxy = FastMCP.as_proxy(
-            self.backend_server_path,
-            name="OktaOAuthMCPProxy"
-        )
-        
-        self.mcp_handler = MCPHandler(self.mcp_proxy, self.auth_handler)
+        # Initialize handlers
+        self.auth_handler = AuthHandler(self.config)
+        self.ui_handlers = UIHandlers(self.auth_handler)
         self.discovery_handler = DiscoveryHandler(self.config)
+        
+        # OAuth MCP handler will be initialized later in run() method
+        self.oauth_mcp_handler = None
         
         # Setup HTTP application
         self.app = web.Application()
@@ -178,13 +175,6 @@ class OAuthFastMCPProxy:
         self.app.router.add_post('/oauth/token', self.auth_handler.oauth_token_virtual)
         self.app.router.add_get('/oauth/userinfo', self.auth_handler.oauth_userinfo_virtual)
         
-        # Protected MCP endpoints
-        self.app.router.add_get("/mcp/tools", self.mcp_handler.protected_mcp_tools)
-        self.app.router.add_post("/mcp/tools/call", self.mcp_handler.protected_mcp_call)
-        self.app.router.add_get("/mcp/resources", self.mcp_handler.protected_mcp_resources)
-        self.app.router.add_post("/mcp/resources/read", self.mcp_handler.protected_mcp_read_resource)
-        self.app.router.add_get("/mcp/prompts", self.mcp_handler.protected_mcp_prompts)
-        
         # Static file serving for images
         # Resolve images path relative to project root
         if not os.path.isabs('./images/'):
@@ -228,8 +218,8 @@ class OAuthFastMCPProxy:
                 </div>
                 <h4>RESTful MCP Endpoints:</h4>
                 <ul>
-                    <li><a href="/mcp/tools">GET /mcp/tools</a> - List available tools</li>
-                    <li>POST /mcp/tools/call - Call a tool</li>
+                    <li><strong>POST /oauth_mcp</strong> - OAuth-protected MCP protocol endpoint (JSON-RPC)</li>
+                    <li><a href="/oauth/permissions">GET /oauth/permissions</a> - View your permissions</li>
                     <li><a href="/mcp/resources">GET /mcp/resources</a> - List resources</li>
                     <li>POST /mcp/resources/read - Read a resource</li>
                     <li><a href="/mcp/prompts">GET /mcp/prompts</a> - List prompts</li>
@@ -271,7 +261,7 @@ class OAuthFastMCPProxy:
             },
             "mcp_endpoints": {
                 "protocol": f"{base_url}/oauth_mcp",
-                "tools": f"{base_url}/mcp/tools",
+                "oauth_mcp": f"{base_url}/oauth_mcp",
                 "resources": f"{base_url}/mcp/resources",
                 "prompts": f"{base_url}/mcp/prompts"
             }
@@ -319,8 +309,9 @@ class OAuthFastMCPProxy:
             logger.info(f"  - POST http://{host}:{port}/oauth_mcp - OAuth-protected MCP protocol endpoint (RBAC-filtered)")
             logger.info(f"  - GET  http://{host}:{port}/oauth/permissions - View OAuth permissions")
             logger.info(f"  - GET  http://{host}:{port}/oauth/login - OAuth login")
-            logger.info(f"  - GET  http://{host}:{port}/mcp/tools  - List MCP tools (protected, legacy)")
-            logger.info(f"  - POST http://{host}:{port}/mcp/tools/call - Call MCP tool (protected, legacy)")
+            logger.info(f"  - POST http://{host}:{port}/oauth_mcp - OAuth-protected MCP protocol endpoint (RBAC-filtered)")
+            logger.info(f"  - GET  http://{host}:{port}/oauth/permissions - View OAuth permissions")
+            logger.info(f"  - GET  http://{host}:{port}/oauth/login - OAuth login")
             
             return runner
             
