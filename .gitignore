@@ -42,3 +42,5 @@ clients/*test*.py
 okta_mcp/oauth_proxy/test_*.py
 .vscode/settings-secure.json
 .vscode/settings.json
+docs/RBAC_IMPLEMENTATION_PLAN.md
+docs/RBAC_IMPLEMENTATION_PLAN_OPTIMIZED.md

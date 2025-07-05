@@ -1038,42 +1038,61 @@ class AuthHandler:
             if auth_header.startswith('Bearer '):
                 token = auth_header[7:]  # Remove 'Bearer ' prefix
                 
-                # Check if this is a virtual access token
+                # Check if this is a real Okta access token we've issued
                 if token in self.tokens:
-                    token_data = self.tokens[token]
+                    session_data = self.tokens[token]
                     
-                    # Check if token has expired
-                    created_at = datetime.fromisoformat(token_data.get('created_at'))
-                    expires_in = token_data.get('expires_in', 3600)
-                    if datetime.now(timezone.utc) > created_at + timedelta(seconds=expires_in):
-                        # Token expired, clean it up
-                        del self.tokens[token]
-                        audit_log("virtual_token_expired", user_id=token_data.get('user_id'))
+                    # For real Okta tokens, validate with Okta (or check if still valid)
+                    try:
+                        # Use the stored session data that we created during token exchange
+                        user_info = {
+                            'user_id': session_data.get('user_id'),
+                            'email': session_data.get('email'),
+                            'name': session_data.get('name'),
+                            'scopes': session_data.get('scopes', []),
+                            'virtual_client_id': session_data.get('virtual_client_id'),
+                            'auth_method': 'okta_bearer_token'
+                        }
+                        
+                        # SECURITY: Ensure we have valid user identification
+                        if not user_info.get('user_id') or not user_info.get('email'):
+                            logger.error(f"Token {token[:20]}... missing user identification")
+                            del self.tokens[token]
+                            audit_log("invalid_token_session", details={"token_prefix": token[:20]})
+                            return None
+                        
+                        audit_log("okta_token_access", user_id=session_data.get('user_id'), details={
+                            'virtual_client_id': session_data.get('virtual_client_id'),
+                            'path': request.path
+                        })
+                        
+                        return user_info
+                        
+                    except Exception as e:
+                        logger.error(f"Token validation failed: {e}")
+                        # Clean up invalid token
+                        if token in self.tokens:
+                            del self.tokens[token]
                         return None
-                    
-                    # Return user info from virtual token (SECURITY FIX: Use stored user data)
-                    user_info = {
-                        'user_id': token_data.get('user_id'),
-                        'email': token_data.get('email'),
-                        'name': token_data.get('name'),
-                        'scopes': token_data.get('scopes', []),
-                        'virtual_client_id': token_data.get('virtual_client_id'),
-                        'auth_method': 'virtual_token'
-                    }
-                    
-                    # SECURITY: Ensure we have valid user identification
-                    if not user_info.get('user_id') or not user_info.get('email'):
-                        logger.error(f"Virtual token {token[:20]}... missing user identification")
-                        del self.tokens[token]
-                        audit_log("invalid_virtual_token", details={"token_prefix": token[:20]})
-                        return None
-                    
-                    audit_log("virtual_token_access", user_id=token_data.get('user_id'), details={
-                        'virtual_client_id': token_data.get('virtual_client_id'),
-                        'path': request.path
-                    })
-                    
-                    return user_info
+                
+                # If token not in our session store, try to validate it directly with Okta
+                try:
+                    # Validate the token by making a userinfo request to Okta
+                    user_info = await self._get_user_info_comprehensive(token)
+                    if user_info:
+                        audit_log("okta_token_direct_validation", user_id=user_info.get('user_id'), details={
+                            'path': request.path
+                        })
+                        return {
+                            'user_id': user_info.get('user_id'),
+                            'email': user_info.get('email'),
+                            'name': user_info.get('name'),
+                            'scopes': user_info.get('scopes', []),
+                            'auth_method': 'okta_direct_validation'
+                        }
+                except Exception as e:
+                    logger.debug(f"Direct token validation failed: {e}")
+                    # Continue to session-based auth below
             
             # Fall back to session-based authentication
             from aiohttp_session import get_session
@@ -1233,33 +1252,41 @@ class AuthHandler:
                     real_access_token = token_response["access_token"]
                     user_info = await self._get_user_info_comprehensive(real_access_token)
                     
-                    # Generate virtual access token for the virtual client
-                    virtual_access_token = f"virtual_token_{secrets.token_urlsafe(32)}"
-                    
-                    # Store virtual token with real user info
-                    self.tokens[virtual_access_token] = {
+                    # Store virtual client relationship for audit and tracking purposes
+                    # But pass through real Okta tokens to the client
+                    virtual_client_session = {
                         'virtual_client_id': virtual_client_id,
                         'user_id': user_info.get('user_id'),
                         'email': user_info.get('email'),
                         'name': user_info.get('name'),
                         'scopes': user_info.get('scopes', []),
                         'created_at': datetime.now(timezone.utc).isoformat(),
-                        'expires_in': token_response.get("expires_in", 3600),
-                        'real_access_token': real_access_token  # Store for API calls
+                        'okta_access_token': real_access_token,  # Store for internal API calls
+                        'token_issued_at': datetime.now(timezone.utc).isoformat()
                     }
+                    
+                    # Store session keyed by real access token for user lookup
+                    self.tokens[real_access_token] = virtual_client_session
                     
                     # Clean up the authorization code
                     del self.state_store[auth_code]
                     
-                    logger.info(f"Created virtual token for user: {user_info.get('user_id')}")
+                    logger.info(f"Created session for virtual client {virtual_client_id} and user: {user_info.get('user_id')}")
                     
-                    # Return token response
-                    return web.json_response({
-                        "access_token": virtual_access_token,
-                        "token_type": "Bearer",
+                    # Return real Okta token response directly to client
+                    response_data = {
+                        "access_token": real_access_token,
+                        "token_type": token_response.get("token_type", "Bearer"),
                         "expires_in": token_response.get("expires_in", 3600),
-                        "scope": " ".join(user_info.get('scopes', []))
-                    }, headers={"Access-Control-Allow-Origin": "*"})
+                        "scope": token_response.get("scope", " ".join(user_info.get('scopes', [])))
+                    }
+                    
+                    # Include refresh token if present (from offline_access scope)
+                    if "refresh_token" in token_response:
+                        response_data["refresh_token"] = token_response["refresh_token"]
+                        logger.info("Refresh token included in response")
+                    
+                    return web.json_response(response_data, headers={"Access-Control-Allow-Origin": "*"})
                     
                 except Exception as token_error:
                     logger.error(f"Failed to exchange authorization code with Okta: {token_error}")
