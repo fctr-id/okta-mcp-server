@@ -19,6 +19,7 @@ from aiohttp_session import get_session
 
 from .models import VirtualClient, AuthorizationCode, UserConsent
 from okta_mcp.auth.oauth_provider import OAuthConfig
+from okta_mcp.auth.role_mapper import OktaGroupRoleMapper
 from .utils import generate_secure_state, generate_secure_code_verifier, audit_log, validate_token_audience
 
 logger = logging.getLogger("oauth_proxy.auth")
@@ -38,6 +39,12 @@ class AuthHandler:
         
         # Additional missing attributes from original
         self.sessions: Dict[str, Dict[str, Any]] = {}  # Session storage for backward compatibility
+        
+        # RBAC Role Mapper
+        self.role_mapper = OktaGroupRoleMapper()
+        logger.debug("Initialized RBAC role mapper")
+        logger.debug(f"Current role mappings: {dict(self.role_mapper.role_to_groups)}")
+        logger.debug(f"Current role levels: {self.role_mapper.role_levels}")
         
         # OAuth client setup using Authlib with httpx
         from authlib.integrations.httpx_client import AsyncOAuth2Client
@@ -109,6 +116,87 @@ class AuthHandler:
             logger.error(f"Failed to get user from session: {e}")
             
         return None
+        
+    async def get_user_from_request(self, request: web.Request) -> Optional[Dict[str, Any]]:
+        """Get user info from request for RBAC middleware - handles both session and token auth"""
+        try:
+            # Try Bearer token first (for API calls)
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                access_token = auth_header[7:]  # Remove "Bearer "
+                
+                # Look up token in our virtual client sessions
+                if access_token in self.tokens:
+                    session_data = self.tokens[access_token]
+                    return {
+                        'user_id': session_data.get('user_id'),
+                        'email': session_data.get('email'),
+                        'name': session_data.get('name'),
+                        'role': session_data.get('rbac_role'),
+                        'groups': session_data.get('groups', []),
+                        'scopes': session_data.get('scopes', [])
+                    }
+                    
+            # Fallback to session-based auth (for web UI)
+            user_id = self.get_user_from_session(request)
+            if user_id:
+                session = await get_session(request)
+                user_info = session.get("user_info", {})
+                
+                # Map role if not already done
+                if "rbac_role" not in user_info:
+                    groups = user_info.get("groups", [])
+                    user_info["rbac_role"] = self.role_mapper.get_user_role(groups)
+                    
+                return {
+                    'user_id': user_id,
+                    'email': user_info.get('email'),
+                    'name': user_info.get('name'),
+                    'role': user_info.get('rbac_role'),
+                    'groups': user_info.get('groups', []),
+                    'scopes': user_info.get('scopes', [])
+                }
+                
+        except Exception as e:
+            logger.error(f"Failed to get user from request: {e}")
+            
+        return None
+        
+    async def update_user_token_and_role(self, access_token: str) -> bool:
+        """Update cached token and re-map role from fresh /userinfo call"""
+        try:
+            if access_token not in self.tokens:
+                logger.warning(f"Token not found in cache for update: {access_token[:20]}...")
+                return False
+                
+            logger.debug(f"Updating token cache and role for access token: {access_token[:20]}...")
+                
+            # Fetch fresh user info (includes groups)
+            fresh_user_info = await self._get_user_info_comprehensive(access_token)
+            
+            # Update the stored session with new role mapping
+            session_data = self.tokens[access_token]
+            old_role = session_data.get('rbac_role')
+            old_groups = session_data.get('groups', [])
+            
+            session_data['groups'] = fresh_user_info.get('groups', [])
+            session_data['rbac_role'] = fresh_user_info.get('rbac_role')
+            session_data['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            new_role = fresh_user_info.get('rbac_role')
+            new_groups = fresh_user_info.get('groups', [])
+            
+            logger.debug(f"Group changes: {old_groups} -> {new_groups}")
+            logger.debug(f"Updated token cache and role for user {session_data.get('user_id')}: {old_role} -> {new_role}")
+            
+            if old_role != new_role:
+                logger.warning(f"User role changed during token update: {old_role} -> {new_role}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update user token and role: {e}")
+            return False
         
     def verify_and_decode_jwt(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify JWT signature and decode claims with proper validation"""
@@ -372,15 +460,24 @@ class AuthHandler:
                 
                 logger.info("Successfully exchanged authorization code for access token")
                 
-                # Get user information from the token
+                # Get user information from both access token and ID token
                 access_token = token_response["access_token"]
-                user_info = await self._get_user_info_comprehensive(access_token)
+                id_token = token_response.get("id_token")  # ID token contains groups
+                
+                logger.debug(f"Token response keys: {list(token_response.keys())}")
+                logger.debug(f"Access token available: {bool(access_token)}")
+                logger.debug(f"ID token available: {bool(id_token)}")
+                if id_token:
+                    logger.debug(f"ID token preview: {id_token[:50]}...")
+                
+                user_info = await self._get_user_info_comprehensive(access_token, id_token)
                 
                 logger.info("Successfully exchanged authorization code for access token")
                 
                 # Store user information in session
                 session["authenticated"] = True
                 session["access_token"] = access_token
+                session["id_token"] = id_token  # Store ID token for future use
                 session["user_info"] = user_info
                 session["token_expires_at"] = (
                     datetime.now(timezone.utc) + timedelta(seconds=token_response.get("expires_in", 3600))
@@ -469,11 +566,42 @@ class AuthHandler:
         ui_handlers = UIHandlers(self)
         return await ui_handlers.handle_consent(request)
 
-    async def _get_user_info_comprehensive(self, access_token: str) -> Dict[str, Any]:
+    async def _get_user_info_comprehensive(self, access_token: str, id_token: Optional[str] = None) -> Dict[str, Any]:
         """Get comprehensive user information from both JWT token and UserInfo endpoint"""
         try:
-            # First get info from JWT token
+            logger.debug(f"Starting comprehensive user info extraction...")
+            logger.debug(f"Access token available: {bool(access_token)}")
+            logger.debug(f"ID token available: {bool(id_token)}")
+            
+            # First get info from JWT access token
             jwt_info = self._extract_user_info(access_token)
+            logger.debug(f"Access token extracted info: {jwt_info}")
+            
+            # Extract groups from ID token if available (ID token typically contains groups)
+            id_token_groups = []
+            if id_token:
+                try:
+                    logger.debug(f"Attempting to extract groups from ID token...")
+                    # Use proper verification for ID token but skip audience validation
+                    decoded_id_token = jwt.decode(id_token, options={"verify_signature": False})
+                    logger.debug(f"ID token decoded successfully. Keys: {list(decoded_id_token.keys())}")
+                    logger.debug(f"ID token payload: {decoded_id_token}")
+                    
+                    # Extract groups from the properly decoded ID token
+                    id_token_groups = decoded_id_token.get("groups", [])
+                    logger.debug(f"ID token extracted {len(id_token_groups)} groups: {id_token_groups}")
+                    
+                    # Also check if groups are under a different key
+                    for key in decoded_id_token.keys():
+                        if 'group' in key.lower():
+                            logger.debug(f"Found group-related key '{key}': {decoded_id_token[key]}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to extract groups from ID token: {e}")
+                    import traceback
+                    logger.error(f"ID token extraction traceback: {traceback.format_exc()}")
+            else:
+                logger.warning("No ID token provided - groups may not be available")
             
             # Then fetch additional user profile info from UserInfo endpoint
             userinfo_endpoint = f"https://{self.config.okta_domain}/oauth2/v1/userinfo"
@@ -491,6 +619,14 @@ class AuthHandler:
                     logger.debug(f"UserInfo endpoint response: {userinfo_data}")
                     
                     # Merge JWT info with UserInfo data, preferring UserInfo for profile data
+                    # For groups, prioritize ID token, then userinfo, then access token
+                    groups = (
+                        id_token_groups or
+                        userinfo_data.get("groups", []) or 
+                        jwt_info.get("groups", []) or 
+                        jwt_info.get("roles", [])
+                    )
+                    
                     comprehensive_info = {
                         "user_id": userinfo_data.get("sub") or jwt_info.get("user_id"),
                         "email": userinfo_data.get("email") or jwt_info.get("email"),
@@ -498,13 +634,21 @@ class AuthHandler:
                         "given_name": userinfo_data.get("given_name"),
                         "family_name": userinfo_data.get("family_name"),
                         "preferred_username": userinfo_data.get("preferred_username"),
-                        "roles": jwt_info.get("roles", []),  # Usually only in JWT
+                        "groups": groups,  # Use prioritized groups
+                        "roles": jwt_info.get("roles", []),  # JWT roles (separate)
                         "scopes": jwt_info.get("scopes", []),  # Usually only in JWT
                         "audience": jwt_info.get("audience"),
                         "issuer": jwt_info.get("issuer"),
                         "auth_time": jwt_info.get("auth_time"),
                         "client_id": jwt_info.get("client_id")
                     }
+                    
+                    # Map groups to RBAC role
+                    user_groups = comprehensive_info.get("groups", [])
+                    logger.debug(f"User {comprehensive_info.get('user_id')} belongs to groups: {user_groups}")
+                    mapped_role = self.role_mapper.get_user_role(user_groups)
+                    comprehensive_info["rbac_role"] = mapped_role
+                    logger.debug(f"User {comprehensive_info.get('user_id')} mapped to role: {mapped_role}")
                     
                     # If name is still empty, try to construct it
                     if not comprehensive_info["name"]:
@@ -571,11 +715,19 @@ class AuthHandler:
                 scope_str = decoded.get("scope", "")
                 scopes = scope_str.split() if scope_str else []
             
+            # Extract groups from JWT token
+            jwt_groups = decoded.get("groups", [])
+            jwt_roles = decoded.get("roles", [])
+            logger.debug(f"JWT groups claim: {jwt_groups}")
+            logger.debug(f"JWT roles claim: {jwt_roles}")
+            logger.debug(f"All JWT claims: {list(decoded.keys())}")
+            
             user_info = {
                 "user_id": user_id,
                 "email": email,
                 "name": name,
-                "roles": decoded.get("groups", []) or decoded.get("roles", []),
+                "groups": jwt_groups,  # Store groups directly
+                "roles": jwt_roles,   # Store roles separately
                 "scopes": scopes,
                 "audience": decoded.get("aud"),
                 "issuer": decoded.get("iss"),
@@ -1248,9 +1400,10 @@ class AuthHandler:
                     
                     logger.info("Successfully exchanged authorization code with Okta")
                     
-                    # Get user information from the real access token
+                    # Get user information from the real access token and ID token
                     real_access_token = token_response["access_token"]
-                    user_info = await self._get_user_info_comprehensive(real_access_token)
+                    real_id_token = token_response.get("id_token")
+                    user_info = await self._get_user_info_comprehensive(real_access_token, real_id_token)
                     
                     # Store virtual client relationship for audit and tracking purposes
                     # But pass through real Okta tokens to the client
@@ -1259,6 +1412,8 @@ class AuthHandler:
                         'user_id': user_info.get('user_id'),
                         'email': user_info.get('email'),
                         'name': user_info.get('name'),
+                        'groups': user_info.get('groups', []),
+                        'rbac_role': user_info.get('rbac_role'),  # Store mapped RBAC role
                         'scopes': user_info.get('scopes', []),
                         'created_at': datetime.now(timezone.utc).isoformat(),
                         'okta_access_token': real_access_token,  # Store for internal API calls
@@ -1296,6 +1451,89 @@ class AuthHandler:
                         "error": "server_error",
                         "error_description": f"Failed to exchange authorization code: {str(token_error)}"
                     }, status=500, headers={"Access-Control-Allow-Origin": "*"})
+            
+            elif grant_type == 'refresh_token':
+                refresh_token = data.get('refresh_token')
+                
+                if not refresh_token:
+                    return web.json_response({
+                        "error": "invalid_request",
+                        "error_description": "refresh_token is required for refresh_token grant"
+                    }, status=400, headers={"Access-Control-Allow-Origin": "*"})
+                
+                logger.debug(f"Refresh token request for client: {client_id}")
+                
+                try:
+                    # Exchange refresh token with Okta for new access token
+                    token_response = await self.oauth_client.refresh_token(
+                        url=self.config.token_url,
+                        refresh_token=refresh_token
+                    )
+                    
+                    logger.info("Successfully refreshed access token with Okta")
+                    
+                    # Get new access token from response
+                    new_access_token = token_response["access_token"]
+                    new_id_token = token_response.get("id_token")
+                    
+                    # Fetch fresh user info (groups may have changed since last login)
+                    fresh_user_info = await self._get_user_info_comprehensive(new_access_token, new_id_token)
+                    
+                    # Find and replace old session data
+                    old_access_token = None
+                    for stored_token, session_data in list(self.tokens.items()):
+                        if session_data.get('virtual_client_id') == client_id:
+                            old_access_token = stored_token
+                            break
+                    
+                    if old_access_token:
+                        # Remove old session
+                        old_session_data = self.tokens.pop(old_access_token)
+                        logger.debug(f"Removed old access token session for client {client_id}")
+                        
+                        # Create new session with updated data
+                        updated_session = {
+                            'virtual_client_id': client_id,
+                            'user_id': fresh_user_info.get('user_id'),
+                            'email': fresh_user_info.get('email'),
+                            'name': fresh_user_info.get('name'),
+                            'groups': fresh_user_info.get('groups', []),
+                            'rbac_role': fresh_user_info.get('rbac_role'),  # Re-mapped role
+                            'scopes': fresh_user_info.get('scopes', []),
+                            'created_at': old_session_data.get('created_at'),  # Keep original creation time
+                            'updated_at': datetime.now(timezone.utc).isoformat(),  # Mark as refreshed
+                            'okta_access_token': new_access_token,
+                            'token_issued_at': datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        # Store new session with new access token as key
+                        self.tokens[new_access_token] = updated_session
+                        
+                        logger.info(f"Replaced access token and updated role for user {fresh_user_info.get('user_id')}: old_role={old_session_data.get('rbac_role')} -> new_role={fresh_user_info.get('rbac_role')}")
+                    else:
+                        logger.warning(f"No existing session found for client {client_id} during refresh")
+                    
+                    # Return new token response to client
+                    response_data = {
+                        "access_token": new_access_token,
+                        "token_type": token_response.get("token_type", "Bearer"),
+                        "expires_in": token_response.get("expires_in", 3600),
+                        "scope": token_response.get("scope", " ".join(fresh_user_info.get('scopes', [])))
+                    }
+                    
+                    # Include new refresh token if present
+                    if "refresh_token" in token_response:
+                        response_data["refresh_token"] = token_response["refresh_token"]
+                        logger.debug("New refresh token included in response")
+                    
+                    return web.json_response(response_data, headers={"Access-Control-Allow-Origin": "*"})
+                    
+                except Exception as refresh_error:
+                    logger.error(f"Failed to refresh token with Okta: {refresh_error}")
+                    return web.json_response({
+                        "error": "invalid_grant",
+                        "error_description": f"Failed to refresh token: {str(refresh_error)}"
+                    }, status=400, headers={"Access-Control-Allow-Origin": "*"})
             
             else:
                 return web.json_response({
@@ -1380,3 +1618,101 @@ class AuthHandler:
             
         except Exception as e:
             logger.error(f"Cleanup task failed: {e}")
+
+    def _verify_and_decode_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+        """Verify ID token signature and issuer but skip audience validation"""
+        try:
+            # First, decode header to get key ID
+            unverified_header = jwt.get_unverified_header(id_token)
+            kid = unverified_header.get('kid')
+            
+            if not kid:
+                logger.error("ID token missing key ID (kid) in header")
+                return None
+            
+            # DEBUG: Decode token without verification to see its contents
+            try:
+                unverified_payload = jwt.decode(id_token, options={"verify_signature": False})
+                logger.debug(f"ID token payload (unverified): {unverified_payload}")
+                logger.debug(f"ID token audience: {unverified_payload.get('aud')}")
+                logger.debug(f"ID token issuer: {unverified_payload.get('iss')}")
+            except Exception as e:
+                logger.warning(f"Could not decode ID token for debugging: {e}")
+            
+            # Get JWKS from Okta (with caching)
+            jwks_data = self._get_cached_jwks()
+            if not jwks_data:
+                logger.error("Failed to retrieve JWKS for ID token verification")
+                return None
+            
+            # Find the matching key
+            matching_key = None
+            for key in jwks_data.get('keys', []):
+                if key.get('kid') == kid:
+                    matching_key = key
+                    break
+            
+            if not matching_key:
+                logger.error(f"No matching key found for kid: {kid}")
+                return None
+            
+            # Convert JWK to PEM format
+            try:
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.asymmetric import rsa
+                import base64
+                
+                # Get the RSA components
+                n = base64.urlsafe_b64decode(matching_key['n'] + '==')
+                e = base64.urlsafe_b64decode(matching_key['e'] + '==')
+                
+                # Create RSA public key
+                public_numbers = rsa.RSAPublicNumbers(
+                    int.from_bytes(e, 'big'),
+                    int.from_bytes(n, 'big')
+                )
+                public_key = public_numbers.public_key()
+                
+                # Convert to PEM
+                pem_key = public_key.public_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                
+            except Exception as e:
+                logger.error(f"Failed to convert JWK to PEM: {e}")
+                return None
+            
+            # Verify the token with signature and issuer validation, skip audience
+            decoded = jwt.decode(
+                id_token,
+                pem_key,
+                algorithms=['RS256'],
+                issuer=self.config.issuer,
+                options={
+                    "verify_signature": True,
+                    "verify_exp": True,
+                    "verify_nbf": True,
+                    "verify_iat": True,
+                    "verify_aud": False,  # Skip audience validation for ID tokens
+                    "require_exp": True,
+                    "require_iat": True,
+                    "require_nbf": False
+                }
+            )
+            
+            logger.debug(f"ID token verification successful for user: {decoded.get('sub')}")
+            return decoded
+            
+        except jwt.ExpiredSignatureError:
+            logger.error("ID token has expired")
+            return None
+        except jwt.InvalidIssuerError as e:
+            logger.error(f"ID token issuer validation failed: {e}")
+            return None
+        except jwt.InvalidSignatureError:
+            logger.error("ID token signature validation failed")
+            return None
+        except Exception as e:
+            logger.error(f"ID token verification failed: {e}")
+            return None

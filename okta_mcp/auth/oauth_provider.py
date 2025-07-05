@@ -23,7 +23,7 @@ class OAuthConfig:
     
     # Scopes and Permissions
     default_scopes: List[str] = field(default_factory=lambda: [
-        "openid", "profile", "email", "offline_access",
+        "openid", "profile", "email", "offline_access", "groups",
         "okta.users.read", "okta.groups.read", "okta.apps.read",
         "okta.events.read", "okta.logs.read", "okta.policies.read",
         "okta.devices.read", "okta.factors.read"
