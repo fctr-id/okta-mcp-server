@@ -72,11 +72,13 @@ Our implementation provides enterprise-grade security for MCP clients accessing 
 
 **Implementation:**
 - ✅ **Access Token Storage**: Real Okta tokens stored securely for audit and management
-- ✅ **Refresh Token Support**: `offline_access` scope requested for long-lived authentication
+- ✅ **Refresh Token Scope Validation**: Refresh tokens only issued when client explicitly requests `offline_access` scope (RFC 6749 Section 6 compliance)
+- ✅ **Original Request Tracking**: Server tracks initial scope request to validate refresh token eligibility
+- ✅ **Conditional Token Response**: Token response only includes `refresh_token` field if originally requested
 - ✅ **Token Expiration**: Automatic cleanup of expired tokens every 5 minutes
 - ✅ **Token Revocation Ready**: Infrastructure prepared for future token revocation capabilities
 
-**Business Value:** Ensures tokens have appropriate lifespans and can be managed throughout their lifecycle.
+**Business Value:** Ensures tokens have appropriate lifespans, prevents unnecessary refresh token issuance, and maintains strict OAuth 2.1 compliance for enhanced security.
 
 ### 4. Audience and Issuer Validation
 
@@ -85,8 +87,71 @@ Our implementation provides enterprise-grade security for MCP clients accessing 
 - ✅ **Issuer Verification**: Strict validation that tokens originate from configured Okta organization
 - ✅ **JWT Signature Verification**: Full cryptographic signature validation using Okta's public keys
 - ✅ **Expiration Enforcement**: Automatic rejection of expired tokens
+- ✅ **Fail-Secure Architecture**: Signature or issuer validation failures immediately halt processing and raise exceptions
 
-**Business Value:** Prevents token substitution attacks and ensures tokens are legitimate and current.
+```python
+# CRITICAL: Fail-secure JWT validation - any validation failure stops processing
+try:
+    decoded = jwt.decode(
+        access_token,
+        signing_key,
+        algorithms=['RS256'],
+        audience=valid_audiences,
+        issuer=self.config.org_url,  # Must match Okta org exactly
+        options={
+            "verify_signature": True,   # CRITICAL: Verify signature
+            "verify_exp": True,         # CRITICAL: Check expiration  
+            "verify_aud": True,         # CRITICAL: Check audience
+            "verify_iss": True,         # CRITICAL: Check issuer
+            "require_exp": True,        # CRITICAL: Require expiration
+            "require_aud": True,        # CRITICAL: Require audience
+            "require_iss": True         # CRITICAL: Require issuer
+        }
+    )
+except jwt.InvalidSignatureError as e:
+    logger.error("JWT signature validation failed")
+    raise jwt.InvalidSignatureError("Access token signature validation failed")
+except jwt.InvalidIssuerError as e:
+    logger.error(f"JWT issuer validation failed: {e}")
+    raise jwt.InvalidIssuerError(f"Access token issuer validation failed: {e}")
+```
+
+**Business Value:** Prevents token substitution attacks, ensures tokens are legitimate and current, and implements zero-trust validation with immediate failure on security violations.
+
+### 5. Refresh Token Security (OAuth 2.1 Compliance)
+
+**Implementation:**
+- ✅ **Scope-Based Issuance**: Refresh tokens only included in response when client originally requested `offline_access` scope
+- ✅ **Request Tracking**: Original authorization request scope tracked throughout OAuth flow
+- ✅ **Conditional Response**: Server validates original scope before including refresh token in token response
+- ✅ **Audit Logging**: All refresh token issuance decisions logged for security monitoring
+
+```python
+# Only include refresh token if client originally requested offline_access scope
+if "refresh_token" in token_response and "offline_access" in original_scopes:
+    response_data["refresh_token"] = token_response["refresh_token"]
+    logger.info("Refresh token included in response (offline_access scope requested)")
+elif "refresh_token" in token_response:
+    logger.info("Refresh token omitted from response (offline_access scope not requested)")
+```
+
+**Business Value:** Prevents unnecessary long-term access token issuance, reduces attack surface, and ensures strict RFC 6749 Section 6 compliance.
+
+### 6. Fail-Secure Architecture
+
+**Implementation:**
+- ✅ **Exception-Based Security**: All critical security failures raise exceptions and halt processing immediately
+- ✅ **No Fallback Authentication**: Invalid tokens never receive alternative authentication methods
+- ✅ **Zero-Trust Validation**: Every token undergoes complete cryptographic validation
+- ✅ **Security Audit Trail**: All validation failures logged with detailed error information
+
+**Critical Security Behaviors:**
+- **Signature Validation Failure**: `jwt.InvalidSignatureError` raised, processing stops immediately
+- **Issuer Validation Failure**: `jwt.InvalidIssuerError` raised, processing stops immediately  
+- **Expiration Validation Failure**: `jwt.ExpiredSignatureError` raised, processing stops immediately
+- **Malformed Token**: `RuntimeError` raised, processing stops immediately
+
+**Business Value:** Ensures that any compromise in token integrity results in complete denial of access rather than degraded security.
 
 ---
 
@@ -168,6 +233,8 @@ Our implementation provides enterprise-grade security for MCP clients accessing 
 | **Token Substitution** | Issuer/audience validation + signature verification | ✅ Implemented |
 | **Authorization Code Interception** | Mandatory PKCE with SHA256 | ✅ Implemented |
 | **Stale Permissions** | Automated consent expiration and cleanup | ✅ Implemented |
+| **Unnecessary Refresh Tokens** | Scope-based refresh token issuance (OAuth 2.1) | ✅ Implemented |
+| **Security Bypass Attempts** | Fail-secure architecture with exception-based validation | ✅ Implemented |
 
 ---
 
@@ -182,6 +249,8 @@ Our implementation provides enterprise-grade security for MCP clients accessing 
 - ✅ PKCE mandatory for all flows
 - ✅ Secure state parameter handling
 - ✅ Proper token validation and lifecycle management
+- ✅ Refresh token scope validation (RFC 6749 Section 6)
+- ✅ Fail-secure JWT validation with exception-based error handling
 - ✅ Contemporary security best practices implemented
 
 ### Industry Standards
@@ -196,6 +265,7 @@ Our implementation provides enterprise-grade security for MCP clients accessing 
 The Okta MCP OAuth Proxy Server implements a comprehensive security framework that exceeds both MCP and OAuth 2.1 requirements. The implementation provides:
 
 - **Defense in Depth**: Multiple layers of security controls protect against various attack vectors
+- **OAuth 2.1 Excellence**: Full adherence to latest OAuth specifications including refresh token scope validation
 - **Compliance Excellence**: Full adherence to latest security specifications and best practices
 - **Enterprise Readiness**: Audit trails, monitoring, and scalability features for production deployment
 - **Developer Experience**: Security that doesn't compromise usability for legitimate MCP clients
