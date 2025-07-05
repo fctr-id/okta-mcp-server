@@ -7,29 +7,34 @@
     "super-admin": {"level": 5}
   },
   "tools": {
-    "get_user": {"min_level": 1},
-    "list_users": {"min_level": 1},
-    "create_user": {"min_level": 2},
-    "update_user": {"min_level": 2},
-    "delete_user": {"min_level": 3},
-    "reset_password": {"min_level": 3},
-    "get_groups": {"min_level": 1},
-    "list_groups": {"min_level": 1},
-    "create_group": {"min_level": 3},
-    "update_group": {"min_level": 3},
-    "delete_group": {"min_level": 3},
-    "get_application": {"min_level": 1},
-    "list_applications": {"min_level": 1},
-    "create_application": {"min_level": 3},
-    "update_application": {"min_level": 3},
-    "delete_application": {"min_level": 3},
-    "get_policy": {"min_level": 2},
-    "list_policies": {"min_level": 2},
-    "create_policy": {"min_level": 3},
-    "update_policy": {"min_level": 3},
-    "delete_policy": {"min_level": 3},
-    "get_log_events": {"min_level": 1},
-    "audit_logs": {"min_level": 4},
-    "system_config": {"min_level": 5}
+    "_comment": "User Tools - basic read operations level 1, advanced read level 2",
+    "list_okta_users": {"min_level": 1},
+    "get_okta_user": {"min_level": 1},
+    "list_okta_user_groups": {"min_level": 1},
+    "list_okta_user_applications": {"min_level": 1},
+    "list_okta_user_factors": {"min_level": 2},
+    
+    "_comment2": "Group Tools - basic read operations level 1, advanced read level 2",
+    "list_okta_groups": {"min_level": 1},
+    "get_okta_group": {"min_level": 1},
+    "list_okta_group_users": {"min_level": 1},
+    
+    "_comment3": "Application Tools - basic read operations level 1, user assignments level 2",
+    "list_okta_applications": {"min_level": 1},
+    "get_okta_application": {"min_level": 1},
+    "list_okta_application_users": {"min_level": 2},
+    "list_okta_application_groups": {"min_level": 2},
+    
+    "_comment4": "Policy and Network Tools - security sensitive, level 2+",
+    "list_okta_policy_rules": {"min_level": 2},
+    "get_okta_policy_rule": {"min_level": 2},
+    "list_okta_network_zones": {"min_level": 3},
+    
+    "_comment5": "Log Events - basic log access level 1, detailed audit level 2",
+    "get_okta_event_logs": {"min_level": 1},
+    
+    "_comment6": "DateTime Utilities - basic tools for all users",
+    "get_current_time": {"min_level": 1},
+    "parse_relative_time": {"min_level": 1}
   }
 }

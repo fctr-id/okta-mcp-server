@@ -1209,7 +1209,7 @@ class AuthHandler:
             if client_id.startswith('virtual-'):
                 # Check if virtual client exists, if not, auto-register it
                 if client_id not in self.virtual_clients:
-                    logger.info(f"📝 Auto-registering virtual client - "
+                    logger.info(f"Auto-registering virtual client - "
                                f"ID: {client_id}")
                     
                     # Create virtual client entry
@@ -1348,6 +1348,8 @@ class AuthHandler:
                             'user_id': session_data.get('user_id'),
                             'email': session_data.get('email'),
                             'name': session_data.get('name'),
+                            'role': session_data.get('rbac_role'),  # Map rbac_role to role for consistency
+                            'groups': session_data.get('groups', []),
                             'scopes': session_data.get('scopes', []),
                             'virtual_client_id': session_data.get('virtual_client_id'),
                             'auth_method': 'okta_bearer_token'

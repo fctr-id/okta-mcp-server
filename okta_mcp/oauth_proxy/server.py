@@ -35,6 +35,7 @@ from okta_mcp.oauth_proxy.auth_handler import AuthHandler
 from okta_mcp.oauth_proxy.ui_handlers import UIHandlers
 from okta_mcp.oauth_proxy.mcp_handler import MCPHandler
 from okta_mcp.oauth_proxy.discovery_handler import DiscoveryHandler
+from okta_mcp.oauth_proxy.simple_oauth_mcp_handler import OAuthMCPHandler
 
 logger = logging.getLogger("oauth_proxy")
 
@@ -56,7 +57,10 @@ class OAuthFastMCPProxy:
         self.auth_handler = AuthHandler(self.config)
         self.ui_handlers = UIHandlers(self.auth_handler)
         
-        # Create FastMCP proxy
+        # Create OAuth-aware FastMCP server for /oauth_mcp endpoint
+        self.oauth_fastmcp_server = None  # Will be initialized asynchronously
+        
+        # Create FastMCP proxy for backward compatibility/legacy endpoints
         from fastmcp import FastMCP
         self.mcp_proxy = FastMCP.as_proxy(
             self.backend_server_path,
@@ -137,8 +141,10 @@ class OAuthFastMCPProxy:
         """Setup all routes by delegating to handlers"""
         # Home and health routes
         self.app.router.add_get("/", self._home)
-        self.app.router.add_post("/", self.mcp_handler.handle_post_root)
         self.app.router.add_get("/health", self._health_check)
+        
+        # Main MCP protocol endpoint - will be set up after OAuth FastMCP server is initialized
+        # This is handled in the run() method after async initialization
         
         # OAuth discovery endpoints (with CORS support)
         self.app.router.add_route('*', '/.well-known/oauth-protected-resource', 
@@ -189,6 +195,15 @@ class OAuthFastMCPProxy:
         
         self.app.router.add_static('/images/', path=images_path, name='images')
     
+    async def _setup_oauth_mcp_routes(self):
+        """Setup OAuth MCP routes after the OAuth MCP handler is initialized"""
+        if self.oauth_mcp_handler:
+            # Add the main MCP protocol endpoint
+            self.app.router.add_route('*', '/oauth_mcp', self.oauth_mcp_handler.handle_mcp_request)
+            logger.info("OAuth MCP routes configured successfully")
+        else:
+            logger.error("Cannot setup OAuth MCP routes - OAuth MCP handler not initialized")
+    
     async def _home(self, request: web.Request) -> web.Response:
         """Home page with OAuth status and MCP info"""
         user_info = await self.auth_handler.get_user_from_request(request)
@@ -206,6 +221,12 @@ class OAuthFastMCPProxy:
                     <p><strong>Scopes:</strong> {', '.join(user_info.get('scopes', []))}</p>
                 </div>
                 <h3>Available MCP Endpoints:</h3>
+                <div style="background: #f0f8ff; padding: 15px; margin: 10px 0; border-left: 4px solid #007acc;">
+                    <h4>🔗 Main MCP Protocol Endpoint (OAuth-Protected):</h4>
+                    <p><strong>POST /oauth_mcp</strong> - Full MCP protocol endpoint with OAuth authentication and RBAC filtering</p>
+                    <p><em>This endpoint provides complete MCP protocol support for Claude Desktop, MCP CLI, and other MCP clients with role-based tool filtering.</em></p>
+                </div>
+                <h4>RESTful MCP Endpoints:</h4>
                 <ul>
                     <li><a href="/mcp/tools">GET /mcp/tools</a> - List available tools</li>
                     <li>POST /mcp/tools/call - Call a tool</li>
@@ -249,6 +270,7 @@ class OAuthFastMCPProxy:
                 "jwks": f"{base_url}/.well-known/jwks.json"
             },
             "mcp_endpoints": {
+                "protocol": f"{base_url}/oauth_mcp",
                 "tools": f"{base_url}/mcp/tools",
                 "resources": f"{base_url}/mcp/resources",
                 "prompts": f"{base_url}/mcp/prompts"
@@ -259,6 +281,18 @@ class OAuthFastMCPProxy:
         """Run the OAuth FastMCP proxy server"""
         try:
             logger.info(f"Starting OAuth FastMCP proxy server on {host}:{port}")
+            
+            # Initialize the OAuth MCP handler
+            logger.info("Initializing OAuth MCP handler...")
+            self.oauth_mcp_handler = OAuthMCPHandler(self.auth_handler)
+            
+            # Initialize tools asynchronously
+            logger.info("Loading tools for OAuth MCP handler...")
+            await self.oauth_mcp_handler._initialize_tools_async()
+            logger.info("OAuth MCP handler initialized successfully")
+            
+            # Now setup the OAuth MCP routes
+            await self._setup_oauth_mcp_routes()
             
             # Start periodic cleanup task for expired entries
             async def periodic_cleanup():
@@ -282,10 +316,11 @@ class OAuthFastMCPProxy:
             logger.info("OAuth FastMCP proxy server started successfully!")
             logger.info("Available endpoints:")
             logger.info(f"  - GET  http://{host}:{port}/          - Home page")
+            logger.info(f"  - POST http://{host}:{port}/oauth_mcp - OAuth-protected MCP protocol endpoint (RBAC-filtered)")
             logger.info(f"  - GET  http://{host}:{port}/oauth/permissions - View OAuth permissions")
             logger.info(f"  - GET  http://{host}:{port}/oauth/login - OAuth login")
-            logger.info(f"  - GET  http://{host}:{port}/mcp/tools  - List MCP tools (protected)")
-            logger.info(f"  - POST http://{host}:{port}/mcp/tools/call - Call MCP tool (protected)")
+            logger.info(f"  - GET  http://{host}:{port}/mcp/tools  - List MCP tools (protected, legacy)")
+            logger.info(f"  - POST http://{host}:{port}/mcp/tools/call - Call MCP tool (protected, legacy)")
             
             return runner
             
