@@ -5,11 +5,11 @@
 </div>
 
 <div align="center">
-  <h2>Okta MCP Server (v0.1.0-BETA)</h2>
+  <h2>Okta MCP Server (v0.2.0-BETA)</h2>
 </div>
 
 <div align="center">
-  <h3> **🚀 NEW in v0.1.0:** **Major Architecture Upgrade with FastMCP 2.0!**</h3>
+  <h3> **🚀 NEW in v0.2.0:** **Major Upgrade with OAuth and RBAC!**</h3>
 </div>
 
 <div align="center">
@@ -27,47 +27,54 @@ The Okta MCP Server is a groundbreaking tool that enables AI models to interact 
 </p>
 </div>
 
-## 🎉 What's New in v0.1.0-BETA - Major Architecture Transformation!
+## 🎉 What's New in v0.2.0-BETA - OAuth & RBAC Enterprise Security!
 
-This release represents a **complete architectural overhaul** with these key improvements:
+This release introduces **enterprise-grade security features** with these key improvements:
 
-### 🏗️ **Core Architecture**
-- **🚀 FastMCP 2.0**: Migrated from legacy MCP package to FastMCP 2.0 for cutting-edge protocol features
-- **🧹 Cleaner Code**: Removed `tool_registry.py` dependency for simpler, more maintainable codebase
-- **⚡ Better Performance**: Modern async patterns and optimized request handling
+### 🔐 **OAuth 2.0 Authentication**
+- **🌐 Web-Based Access**: Complete OAuth 2.0/OIDC flow with Okta integration
+- **🛡️ Secure Sessions**: PKCE-enabled OAuth with encrypted session management
+- **📱 Modern UI**: Web interface for OAuth consent and user authentication
+- **🔗 Universal Access**: Works with web applications, browsers, and OAuth-compatible clients
 
-### 🛠️ **Enhanced Tools**
-- **📝 Complete Rewrite**: All tools rewritten with better annotations and descriptions for AI understanding
-- **🛡️ Improved Validation**: Enhanced error handling and input validation across all operations
+### 🏢 **Role-Based Access Control (RBAC)**
+- **� Group Mapping**: Automatic role assignment based on Okta group membership
+- **� Tool Filtering**: Dynamic tool access based on user roles (viewer/admin/super-admin)
+- **⚡ Real-Time**: Live permission evaluation during each request
+- **📊 Configurable**: JSON-based role configuration with environment variable group mappings
 
-### 🌐 **Unified Client**
-- **🎯 Single CLI**: New unified command-line client supporting multiple transports (STDIO, HTTP)
-- **⚙️ Simplified Setup**: Streamlined configuration with intelligent defaults
+### 🏗️ **Unified Architecture**
+- **� Single Entry Point**: Unified server runner supporting multiple modes
+- **🚀 Concurrent Servers**: Run both STDIO and OAuth servers simultaneously
+- **⚙️ Flexible Deployment**: Choose between STDIO (direct clients) or OAuth (web access)
+- **🛡️ Security First**: Clear separation between authenticated and unauthenticated modes
 
-### 🔐 **Advanced Security**
-- **🎫 Bearer Tokens**: Full JWT bearer token support with `jwks_uri` validation
-- **🏢 Enterprise Auth**: Support for enterprise authentication flows and scope-based access
+### 🧹 **Production Ready**
+- **📝 Clean Codebase**: Removed redundant files, consolidated architecture
+- **📚 Essential Docs**: Streamlined documentation focused on production use
+- **� Security Logging**: Sensitive data protection with appropriate log levels
+- **✅ Protocol Compliance**: Full MCP specification compliance with OAuth endpoints
 
-### 🔄 **Protocol Compatibility**
-- **🧩 Universal Client Support**: Built-in compatibility layer for Claude Desktop (2025-03-26) and VS Code/MCP Inspector (2025-06-18)
-- **🔍 Automatic Detection**: Automatically detects client protocol version and formats responses accordingly
-- **⚙️ Zero Configuration**: No manual setup required - works out of the box with all MCP clients
-- **📈 Future-Proof**: Ready for protocol evolution while maintaining backward compatibility
+## 🌟 OAuth & RBAC Highlights
 
-### 🚀 **Future-Ready**
-- **🎯 Sampling Support**: Foundation for advanced request sampling capabilities
-- **🔌 Middleware Ready**: Extensible middleware system for custom processing
-- **📡 Protocol Evolution**: Access to latest MCP features as they're developed and standardized
+**🔐 Enterprise Authentication**: Full OAuth 2.0/OIDC integration with Okta for secure web-based access to MCP tools.
+
+**🛡️ Role-Based Security**: Dynamic tool filtering based on user roles - viewers get 12 tools, admins get 17 tools, super-admins get all 18 tools.
+
+**🚀 Dual Access Modes**: 
+- **STDIO Mode**: Direct client access (Claude Desktop, VS Code) - `python -m okta_mcp.run_server`
+- **OAuth Mode**: Web-based authenticated access - `python -m okta_mcp.run_server mcp-with-auth`
+
+**⚡ Live Permission Evaluation**: Real-time role assignment and tool filtering based on Okta group membership during each request.
 
 ## 📋 Table of Contents
 
-- [🎉 What's New in v0.1.0-BETA - Major Architecture Transformation!](#-whats-new-in-v010-beta---major-architecture-transformation)
-  - [🏗️ **Core Architecture**](#️-core-architecture)
-  - [🛠️ **Enhanced Tools**](#️-enhanced-tools)
-  - [🌐 **Unified Client**](#-unified-client)
-  - [🔐 **Advanced Security**](#-advanced-security)
-  - [🔄 **Protocol Compatibility**](#-protocol-compatibility)
-  - [🚀 **Future-Ready**](#-future-ready)
+- [🎉 What's New in v0.2.0-BETA - OAuth \& RBAC Enterprise Security!](#-whats-new-in-v020-beta---oauth--rbac-enterprise-security)
+  - [🔐 **OAuth 2.0 Authentication**](#-oauth-20-authentication)
+  - [🏢 **Role-Based Access Control (RBAC)**](#-role-based-access-control-rbac)
+  - [🏗️ **Unified Architecture**](#️-unified-architecture)
+  - [🧹 **Production Ready**](#-production-ready)
+- [🌟 OAuth \& RBAC Highlights](#-oauth--rbac-highlights)
 - [📋 Table of Contents](#-table-of-contents)
 - [🔍 What is the Model Context Protocol?](#-what-is-the-model-context-protocol)
 - [⚠️ IMPORTANT: Security \& Limitations](#️-important-security--limitations)
@@ -75,8 +82,14 @@ This release represents a **complete architectural overhaul** with these key imp
   - [📊 Context Window Limitations](#-context-window-limitations)
   - [🚨 HTTP Transport Security Warning](#-http-transport-security-warning)
 - [🛠️ Available Tools](#️-available-tools)
+  - [📋 All Available Tools (STDIO Mode)](#-all-available-tools-stdio-mode)
+  - [🔐 Role-Based Tool Access (OAuth Mode)](#-role-based-tool-access-oauth-mode)
+  - [📊 RBAC Configuration](#-rbac-configuration)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
+  - [Installation \& Basic Setup](#installation--basic-setup)
+  - [Running the Server](#running-the-server)
+  - [Quick Test with CLI Client](#quick-test-with-cli-client)
 - [🧠 Supported AI Providers](#-supported-ai-providers)
   - [Currently Supported Providers:](#currently-supported-providers)
   - [Installation](#installation)
@@ -162,6 +175,8 @@ The HTTP transport modes (both Streamable HTTP and SSE) have significant securit
 
 The Okta MCP Server currently provides the following tools:
 
+### 📋 All Available Tools (STDIO Mode)
+
 **User Management**
 - `list_okta_users` - Retrieve users with filtering, search, and pagination options
 - `get_okta_user` - Get detailed information about a specific user by ID or login
@@ -192,6 +207,49 @@ The Okta MCP Server currently provides the following tools:
 - `get_current_time` - Get current UTC time in ISO 8601 format
 - `parse_relative_time` - Convert natural language time expressions to ISO 8601 format
 
+### 🔐 Role-Based Tool Access (OAuth Mode)
+
+When using OAuth authentication, tool access is filtered based on user roles:
+
+| Tool Name | Description | Available to Roles |
+|-----------|-------------|--------------------|
+| **User Management** |
+| `list_okta_users` | Retrieve users with filtering and search | Viewer, Security Admin, Super Admin |
+| `get_okta_user` | Get user details by ID or login | Viewer, Security Admin, Super Admin |
+| `list_okta_user_groups` | List user's group memberships | Viewer, Security Admin, Super Admin |
+| `list_okta_user_applications` | List user's assigned applications | Viewer, Security Admin, Super Admin |
+| `list_okta_user_factors` | List user authentication factors | Security Admin, Super Admin |
+| **Group Operations** |
+| `list_okta_groups` | Retrieve groups with filtering and search | Viewer, Security Admin, Super Admin |
+| `get_okta_group` | Get group details | Viewer, Security Admin, Super Admin |
+| `list_okta_group_members` | List group members | Viewer, Security Admin, Super Admin |
+| `list_okta_assigned_applications_for_group` | List applications assigned to groups | Security Admin, Super Admin |
+| **Application Management** |
+| `list_okta_applications` | Retrieve applications with filtering | Viewer, Security Admin, Super Admin |
+| `list_okta_application_users` | List users assigned to applications | Viewer, Security Admin, Super Admin |
+| `list_okta_application_group_assignments` | List group assignments to applications | Viewer, Security Admin, Super Admin |
+| **Policy & Network Management** |
+| `list_okta_policy_rules` | List policy rules with conditions | Security Admin, Super Admin |
+| `get_okta_policy_rule` | Get detailed policy rule information | Security Admin, Super Admin |
+| `list_okta_network_zones` | List network zones with IP ranges | Super Admin |
+| **System Log Events** |
+| `get_okta_event_logs` | Retrieve system log events | Security Admin, Super Admin |
+| **Date & Time Utilities** |
+| `get_current_time` | Get current UTC time | Viewer, Security Admin, Super Admin |
+| `parse_relative_time` | Parse time expressions | Viewer, Security Admin, Super Admin |
+
+### 📊 RBAC Configuration
+
+Users are automatically assigned roles based on their Okta group membership:
+
+| Role | Group Mapping Variable | Tools Available | Use Case |
+|------|----------------------|-----------------|----------|
+| **Viewer** | `GROUP_TO_ROLE_VIEWER` | 12 tools | General users, help desk, contractors |
+| **Security Admin** | `GROUP_TO_ROLE_SECURITY_ADMIN` | 17 tools | Security team, identity admins |
+| **Super Admin** | `GROUP_TO_ROLE_SUPER_ADMIN` | 18 tools | Platform admins, senior engineers |
+
+> **Note:** Users not in any mapped groups will have no tool access (secure by default).
+
 
 > Additional tools for applications, factors, policies, and more advanced operations are on the roadmap and will be added in future releases.
 
@@ -210,6 +268,50 @@ The Okta MCP Server currently provides the following tools:
 > - Google-2.5-pro
 >
 > You must use latest model versions that explicitly support tool calling/function calling capabilities. Older models or models without tool calling support will not be able to interact with the Okta MCP Server.
+
+### Installation & Basic Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/fctr-id/okta-mcp-server.git
+cd okta-mcp-server
+
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Copy the sample config
+cp .env.sample .env
+# Edit .env with your Okta settings and AI provider configuration
+```
+
+### Running the Server
+
+The server supports multiple modes via the unified runner:
+
+```bash
+# Default: STDIO transport (recommended for Claude Desktop, VS Code)
+python -m okta_mcp.run_server
+
+# OAuth-protected web server (for web applications)
+python -m okta_mcp.run_server mcp-with-auth
+
+# Both servers concurrently
+python -m okta_mcp.run_server --both
+
+# HTTP without auth (TESTING ONLY - dangerous)
+python -m okta_mcp.run_server --danger-mcp-no-auth
+```
+
+### Quick Test with CLI Client
+
+```bash
+cd clients
+python basic_mcp_client.py
+```
 
 ## 🧠 Supported AI Providers
 
@@ -272,6 +374,8 @@ The Okta MCP Server supports multiple transport protocols:
 - **Use case**: Ideal for desktop AI assistants like Claude Desktop
 - **Performance**: ✅ Lightweight and efficient
 - **Configuration**: For Claude Desktop, add to `claude_desktop_config.json`:
+  
+  **Basic STDIO Mode (Direct Connection):**
   ```json
   {
     "mcpServers": {
@@ -288,7 +392,36 @@ The Okta MCP Server supports multiple transport protocols:
     }
   }
   ```
-  *Replace `DIR` with your absolute directory path and `OKTA_API_TOKEN` with your actual token*
+
+    *Replace `DIR` with your absolute directory path and `OKTA_API_TOKEN` with your actual token*
+  
+  **OAuth Mode with RBAC (Recommended for Production):**
+  ```json
+  {
+    "mcpServers": {
+      "okta-mcp-server-oauth": {
+        "command": "DIR/okta-mcp-server/venv/Scripts/python",
+        "args": [
+          "-m", "okta_mcp.run_server", "mcp-with-auth"
+        ],
+        "env": {
+          "OKTA_CLIENT_ORGURL": "https://your-org.okta.com",
+          "OKTA_API_TOKEN": "your_api_token",
+          "OKTA_CLIENT_ID": "your_oauth_client_id",
+          "OKTA_CLIENT_SECRET": "your_oauth_client_secret",
+          "OKTA_ORG_URL": "https://your-org.okta.com",
+          "OKTA_OAUTH_AUDIENCE": "your_audience_identifier",
+          "OAUTH_REDIRECT_URI": "http://localhost:3001/oauth/callback",
+          "OAUTH_REQUIRE_HTTPS": "false",
+          "GROUP_TO_ROLE_SUPER_ADMIN": "Okta Group 1, okta group 2",
+          "GROUP_TO_ROLE_SECURITY_ADMIN": "Okta security Group",
+          "GROUP_TO_ROLE_VIEWER": "Users,Everyone"
+        }
+      }
+    }
+  }
+  ```
+  * `DIR` with your absolute directory path and `OKTA_API_TOKEN` with your actual token*
 
 #### 2. Streamable HTTP Transport - Modern & Current Standard
 
@@ -473,7 +606,16 @@ docker build --target sse -t okta-mcp-server:sse .
 
 ## 🗺️ Roadmap
 
-**v0.1.0-BETA - Current (MAJOR ARCHITECTURAL OVERHAUL!)**
+**v0.2.0-BETA - Current (OAUTH & RBAC ENTERPRISE SECURITY!)**
+- [x] Complete OAuth 2.0/OIDC authentication flow with Okta
+- [x] Role-based access control (RBAC) with dynamic tool filtering
+- [x] Unified server runner with multiple deployment modes
+- [x] Production-ready codebase with security-first design
+- [x] MCP-compliant OAuth endpoints with session management
+- [x] Real-time permission evaluation based on Okta groups
+- [x] Comprehensive documentation cleanup and consolidation
+
+**v0.1.0-BETA - Previous (ARCHITECTURAL OVERHAUL)**
 - [x] Complete migration to FastMCP 2.0 architecture
 - [x] Comprehensive rewrite of all tools with enhanced annotations
 - [x] New unified CLI client supporting multiple transports
@@ -481,12 +623,6 @@ docker build --target sse -t okta-mcp-server:sse .
 - [x] Advanced bearer token support with jwks_uri validation
 - [x] Significantly enhanced error handling and validation
 - [x] Performance optimizations and modern async patterns
-
-**v0.3.0 - Previous**
-- [x] Streamable HTTP transport support
-- [x] Real-time event streaming
-- [x] Session management and resumability
-- [x] Enhanced client applications
 
 **Future plans include:**
 - [ ] Complete user lifecycle operations
@@ -500,7 +636,7 @@ docker build --target sse -t okta-mcp-server:sse .
 - [ ] System log integration
 - [ ] Security insights generation
 - [ ] Multi-tenant support
-- [ ] Role-based access control
+- [ ] Advanced RBAC features (custom roles, fine-grained permissions)
 
 ## 🆘 Need Help?
 
