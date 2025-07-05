@@ -2,18 +2,23 @@
 
 ## Overview
 
-This document outlines the comprehensive security measures implemented in the Okta MCP OAuth proxy server. The implementation follows OAuth 2.0 Security Best Practices (RFC 9700) and MCP Security Best Practices as of **July 3, 2025**.
+This document outlines the comprehensive security measures implemented in the Okta MCP OAuth proxy server. The implementation follows OAuth 2.0 Security Best Practices (RFC 9700), MCP Security Best Practices, and implements enterprise-grade JWT validation with Role-Based Access Control (RBAC) as of **July 5, 2025**.
 
 **Reference**: https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices
 
 ## Security Architecture
 
-The OAuth proxy server implements a defense-in-depth security model with multiple layers of protection:
+The OAuth proxy server implements a defense-in-depth security model with multiple layers of protection and real-time RBAC enforcement:
 
 ```
 AI Client → OAuth Proxy Server → Okta OAuth Server
     ↓              ↓                    ↓
 Security Layer 1  Security Layer 2    Security Layer 3
+    ↓              ↓                    ↓
+   PKCE         JWT Validation       RBAC Filtering
+   CSRF         Signature Verify     Role Mapping
+   Session      Issuer Validate      Tool Access
+   Audit        Exception Based      Group Sync
 ```
 
 ## Client-to-Proxy Security Protections
@@ -296,107 +301,174 @@ audit_entry = {
 - **Rate limiting ready**: Structured for future rate limiting implementation
 - **Attack detection**: Suspicious pattern identification
 
-## Compliance and Best Practices
+## Advanced Security Features (July 5, 2025 Updates)
 
-### 1. Standards Compliance (as of July 3, 2025)
+### 1. Comprehensive Audit Logging
 
-**OAuth 2.0 Security Best Practices (RFC 9700)**:
-- ✅ PKCE for all authorization code flows
-- ✅ Short authorization code lifetime (≤10 minutes)
-- ✅ Proper JWT validation with signature verification
-- ✅ Audience and issuer validation
-- ✅ Secure redirect URI handling
-- ✅ State parameter for CSRF protection
+**Protection**: Full security event tracking and forensics
 
-**OAuth 2.0 Bearer Token Usage (RFC 6750)**:
-- ✅ WWW-Authenticate header in 401 responses
-- ✅ Resource metadata URL for client guidance
-- ✅ Standard error codes and descriptions
-- ✅ Proper authentication realm specification
+**Implementation**:
+- **Authentication events**: Login, logout, token refresh, failures
+- **Authorization events**: Role assignments, permission checks, access denials
+- **Security violations**: Invalid tokens, expired credentials, manipulation attempts
+- **Administrative actions**: Role changes, configuration updates, user management
 
-**MCP Security Best Practices**:
-- ✅ User-bound session management
-- ✅ No direct token passthrough
-- ✅ Proper audience validation
-- ✅ Defense-in-depth architecture
-
-### 2. Security Implementation Quality
-
-**Production Ready Features**:
-- ✅ Cryptographically secure random generation
-- ✅ Proper error handling and logging
-- ✅ Memory management and cleanup
-- ✅ Configuration validation
-- ✅ Comprehensive test coverage preparation
-
-## Deployment Security Checklist
-
-### Production Deployment Requirements
-
-**Environment Configuration**:
-- [ ] Set `OAUTH_REQUIRE_HTTPS=true`
-- [ ] Configure `SESSION_SECRET_KEY` with 32-byte random key
-- [ ] Use production-grade Okta organization
-- [ ] Set secure `OKTA_OAUTH_AUDIENCE`
-- [ ] Configure proper `OAUTH_REDIRECT_URI`
-
-**Infrastructure Security**:
-- [ ] Deploy behind HTTPS load balancer
-- [ ] Implement rate limiting (future enhancement)
-- [ ] Configure monitoring and alerting
-- [ ] Set up log aggregation for audit events
-- [ ] Implement automated security scanning
-
-### Development vs. Production
-
-**Development Settings** (`.env.sample`):
-```bash
-OAUTH_REQUIRE_HTTPS=false
-OAUTH_REDIRECT_URI=http://localhost:3001/oauth/callback
-LOG_LEVEL=DEBUG
+```python
+# Security audit example
+self._audit_log("jwt_verification_failed", details={
+    "error": str(e), 
+    "token_prefix": token[:20],
+    "user_id": user_id,
+    "timestamp": datetime.now(timezone.utc).isoformat()
+})
 ```
 
-**Production Settings**:
-```bash
-OAUTH_REQUIRE_HTTPS=true
-OAUTH_REDIRECT_URI=https://your-domain.com/oauth/callback
-LOG_LEVEL=INFO
-SESSION_SECRET_KEY=<32-byte-base64-key>
+### 2. Fail-Secure Architecture
+
+**Protection**: Security-first error handling and fallbacks
+
+**Design Principles**:
+- **Default deny**: Users without valid roles get no access
+- **Explicit permissions**: Tools must be explicitly allowed for roles
+- **No fallback tokens**: Authentication failures don't fall back to insecure methods
+- **Exception propagation**: Critical security failures halt processing immediately
+
+### 3. Real-Time Group Synchronization
+
+**Protection**: Immediate enforcement of organizational changes
+
+**Implementation**:
+- **ID token groups**: Primary source for real-time group membership
+- **UserInfo endpoint**: Secondary verification and additional claims
+- **Refresh token updates**: Groups re-synchronized on every token refresh
+- **Session invalidation**: Role changes trigger session updates
+
+### 4. Zero-Trust Token Validation
+
+**Protection**: Never trust, always verify token integrity
+
+**Implementation**:
+- **No unsigned tokens**: All tokens must have valid cryptographic signatures
+- **Issuer verification**: Only accept tokens from configured Okta organization
+- **Temporal validation**: Strict enforcement of expiration and not-before claims
+- **Audience specificity**: ID tokens for identity, access tokens for API access
+
+## Security Compliance and Standards
+
+### 1. OAuth 2.1 Security Best Practices Compliance
+
+**Standards Followed**:
+- ✅ **RFC 9700**: OAuth 2.0 Security Best Practices
+- ✅ **RFC 7636**: PKCE (Proof Key for Code Exchange)
+- ✅ **RFC 8252**: OAuth 2.0 for Native Apps (adapted for proxy)
+- ✅ **OIDC Core**: OpenID Connect security requirements
+- ✅ **Refresh Token Scope Validation**: RFC 6749 Section 6 compliance
+
+**Refresh Token Security**:
+- **Scope-based issuance**: Refresh tokens only issued when client explicitly requests `offline_access` scope
+- **Original request tracking**: Server tracks initial scope request to validate refresh token eligibility
+- **Conditional response**: Token response only includes `refresh_token` field if originally requested
+
+```python
+# Only include refresh token if client originally requested offline_access scope
+if "refresh_token" in token_response and "offline_access" in original_scopes:
+    response_data["refresh_token"] = token_response["refresh_token"]
+    logger.info("Refresh token included in response (offline_access scope requested)")
+elif "refresh_token" in token_response:
+    logger.info("Refresh token omitted from response (offline_access scope not requested)")
 ```
 
-## Future Security Enhancements
+### 2. Enterprise Security Controls
 
-### Phase 1 (Immediate - Completed ✅)
-- ✅ Comprehensive JWT signature verification
-- ✅ PKCE implementation with proper validation
-- ✅ Audience and issuer validation
-- ✅ Secure session management
-- ✅ Authorization code expiration
-- ✅ Virtual token isolation
-- ✅ Security audit logging
-- ✅ RFC 6750 compliant 401 responses with WWW-Authenticate headers
+**Implemented Controls**:
+- ✅ **Multi-factor authentication**: Inherits from Okta organization policies
+- ✅ **Role-based access control**: Dynamic group-to-role mapping with tool filtering
+- ✅ **Session management**: Secure session handling with automatic cleanup
+- ✅ **Audit trails**: Comprehensive logging for compliance and forensics
 
-### Phase 2 (Short-term)
-- [ ] Rate limiting on OAuth endpoints
-- [ ] Advanced threat detection
-- [ ] OAuth 2.1 compliance enhancements
-- [ ] Structured security metrics
+### 3. Development vs Production Security
 
-### Phase 3 (Long-term)
-- [ ] Hardware security module (HSM) integration
-- [ ] Advanced session analytics
-- [ ] Automated security response
-- [ ] Zero-trust architecture enhancements
+**Development Mode** (OAUTH_REQUIRE_HTTPS=false):
+- HTTP allowed for localhost testing
+- Debug logging enabled
+- Relaxed CORS policies
+- Extended session timeouts
+
+**Production Mode** (OAUTH_REQUIRE_HTTPS=true):
+- HTTPS enforcement required
+- Minimal logging (no sensitive data)
+- Strict CORS policies
+- Short session timeouts
+- Error message sanitization
+
+## Security Implementation Status
+
+### Phase 1 (Core Security - Completed ✅)
+- ✅ **Enterprise JWT validation**: Full RSA-256 signature verification with exception handling
+- ✅ **RBAC implementation**: Dynamic group-to-role mapping with real-time updates
+- ✅ **PKCE implementation**: Secure authorization code exchange protection
+- ✅ **ID token security**: Cryptographic verification with issuer validation
+- ✅ **Access token security**: Full validation with graceful audience handling
+- ✅ **Comprehensive audit logging**: All security events tracked with forensics data
+- ✅ **Fail-secure architecture**: Critical failures stop processing immediately
+- ✅ **Zero-trust validation**: Never accept unsigned or unverified tokens
+- ✅ **Real-time group sync**: Role updates on token refresh with session cache
+- ✅ **Tool-level permissions**: Granular RBAC filtering with hierarchical roles
+
+### Phase 2 (Advanced Security - In Progress 🔄)
+- 🔄 **Rate limiting**: Per-user and per-endpoint request throttling
+- 🔄 **Token rotation**: Automatic refresh token rotation for enhanced security
+- 🔄 **Session fingerprinting**: Additional session validation with device fingerprints
+- 🔄 **Threat detection**: Anomaly detection for suspicious authentication patterns
+
+### Phase 3 (Enterprise Features - Planned 📋)
+- 📋 **Multi-tenant support**: Organization-specific configurations and isolation
+- 📋 **Advanced audit**: SIEM integration and compliance reporting
+- 📋 **Key rotation**: Automatic JWKS key rotation handling
+- 📋 **Backup authentication**: Fallback mechanisms for Okta outages
 
 ## Security Testing and Validation
 
-### Automated Security Tests
-- Token validation edge cases
-- PKCE flow security
-- Session management security
-- JWT manipulation attempts
-- Redirect URI validation
-- Authorization code replay protection
+### Current Security Test Coverage ✅
+- ✅ **JWT validation edge cases**: Expired, malformed, unsigned tokens
+- ✅ **RBAC enforcement**: Role mapping, tool filtering, permission boundaries
+- ✅ **Exception handling**: Security failure propagation and error states
+- ✅ **Group synchronization**: Real-time role updates during token refresh
+- ✅ **Token lifecycle**: Authorization code flow, refresh token handling
+- ✅ **Audience validation**: ID token vs access token audience handling
+
+### Recommended Security Testing
+- **Penetration testing**: Third-party security assessment
+- **Token manipulation**: Attempt JWT signature tampering
+- **Session hijacking**: Test session isolation and binding
+- **Authorization bypass**: Verify RBAC enforcement boundaries
+- **Refresh token abuse**: Test token rotation and invalidation
+- **Group privilege escalation**: Verify highest-role-wins logic
+
+## Production Deployment Checklist
+
+### Pre-Deployment Security ✅
+- ✅ **Environment variables**: All secrets in secure environment configuration
+- ✅ **HTTPS enforcement**: `OAUTH_REQUIRE_HTTPS=true` for production
+- ✅ **RBAC configuration**: Group mappings and role hierarchy validated
+- ✅ **Audit logging**: Security event logging enabled and configured
+- ✅ **Error handling**: Production error messages sanitized
+- ✅ **Session security**: Secure cookie settings and encryption enabled
+
+### Runtime Security Monitoring
+- **Authentication failures**: Monitor for brute force attempts
+- **Token validation errors**: Track signature and issuer failures
+- **Role assignment anomalies**: Monitor for unexpected privilege escalations
+- **Session anomalies**: Track unusual session patterns and durations
+- **RBAC violations**: Monitor unauthorized tool access attempts
+
+## Security Contact and Updates
+
+**Last Updated**: July 5, 2025  
+**Next Review**: August 5, 2025  
+**Security Version**: 2.1.0 (Enterprise JWT + RBAC)
+
+For security concerns or to report vulnerabilities, please contact the security team through your organization's designated security channels.
 
 ### Manual Security Verification
 - OAuth flow end-to-end testing

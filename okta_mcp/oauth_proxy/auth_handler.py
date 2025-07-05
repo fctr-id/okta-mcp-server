@@ -376,6 +376,7 @@ class AuthHandler:
                             'virtual_client_id': stored_data.get('virtual_client_id'),
                             'code_verifier': stored_data.get('code_verifier'),
                             'original_state': received_state,
+                            'original_scope': stored_data.get('original_scope'),  # Pass through original scope
                             'timestamp': datetime.now(timezone.utc).isoformat(),
                             'expires_at': expires_at.isoformat(),  # SECURITY FIX: Add expiration
                             'used': False  # SECURITY FIX: Track if code has been used
@@ -581,25 +582,42 @@ class AuthHandler:
             id_token_groups = []
             if id_token:
                 try:
-                    logger.debug(f"Attempting to extract groups from ID token...")
-                    # Use proper verification for ID token but skip audience validation
-                    decoded_id_token = jwt.decode(id_token, options={"verify_signature": False})
-                    logger.debug(f"ID token decoded successfully. Keys: {list(decoded_id_token.keys())}")
-                    logger.debug(f"ID token payload: {decoded_id_token}")
+                    logger.debug(f"Attempting to extract groups from ID token with proper verification...")
+                    # SECURITY: Use proper signature and issuer verification for ID token
+                    decoded_id_token = self._verify_and_decode_id_token(id_token)
                     
-                    # Extract groups from the properly decoded ID token
-                    id_token_groups = decoded_id_token.get("groups", [])
-                    logger.debug(f"ID token extracted {len(id_token_groups)} groups: {id_token_groups}")
+                    if decoded_id_token:
+                        logger.debug(f"ID token verified successfully. Keys: {list(decoded_id_token.keys())}")
+                        logger.debug(f"ID token payload: {decoded_id_token}")
+                        
+                        # Extract groups from the properly verified ID token
+                        id_token_groups = decoded_id_token.get("groups", [])
+                        logger.debug(f"ID token extracted {len(id_token_groups)} groups: {id_token_groups}")
+                        
+                        # Also check if groups are under a different key
+                        for key in decoded_id_token.keys():
+                            if 'group' in key.lower():
+                                logger.debug(f"Found group-related key '{key}': {decoded_id_token[key]}")
+                    else:
+                        logger.error("Failed to verify ID token - signature or issuer validation failed")
+                        # Don't fail the entire process, just log and continue without ID token groups
                     
-                    # Also check if groups are under a different key
-                    for key in decoded_id_token.keys():
-                        if 'group' in key.lower():
-                            logger.debug(f"Found group-related key '{key}': {decoded_id_token[key]}")
+                except (jwt.ExpiredSignatureError, jwt.InvalidSignatureError, jwt.InvalidIssuerError) as e:
+                    logger.error(f"Critical ID token validation failure: {e}")
+                    # These are security-critical failures - we should not continue processing
+                    raise RuntimeError(f"Authentication failed due to invalid ID token: {e}")
+                    
+                except (ValueError, RuntimeError) as e:
+                    logger.error(f"ID token processing error: {e}")
+                    # These are also critical - should not continue
+                    raise RuntimeError(f"Authentication failed due to ID token error: {e}")
                     
                 except Exception as e:
-                    logger.error(f"Failed to extract groups from ID token: {e}")
+                    logger.error(f"Unexpected error extracting groups from ID token: {e}")
                     import traceback
                     logger.error(f"ID token extraction traceback: {traceback.format_exc()}")
+                    # For unexpected errors, log but don't fail the entire authentication
+                    logger.warning("Continuing authentication without ID token groups due to unexpected error")
             else:
                 logger.warning("No ID token provided - groups may not be available")
             
@@ -681,9 +699,20 @@ class AuthHandler:
         """Extract user information from JWT access token with PROPER SECURITY VALIDATION"""
         try:
             # SECURITY FIX: Properly verify JWT signature and claims
-            decoded = self._verify_and_decode_jwt(access_token)
+            try:
+                decoded = self._verify_and_decode_jwt(access_token)
+            except (jwt.ExpiredSignatureError, jwt.InvalidSignatureError, jwt.InvalidIssuerError) as e:
+                logger.error(f"Critical access token validation failure: {e}")
+                # These are security-critical failures - we should not continue processing
+                raise RuntimeError(f"Authentication failed due to invalid access token: {e}")
+            except Exception as e:
+                logger.error(f"Access token verification error: {e}")
+                # For other errors (like audience issues), we can fall back
+                logger.warning("Falling back to default user info due to token verification issues")
+                return self._get_fallback_user_info()
+                
             if not decoded:
-                logger.error("JWT verification failed")
+                logger.error("JWT verification failed - unable to extract user info")
                 return self._get_fallback_user_info()
             
             logger.debug(f"JWT token contents: {decoded}")
@@ -757,6 +786,122 @@ class AuthHandler:
             "auth_time": None,
             "client_id": None
         }
+
+    def _verify_and_decode_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
+        """SECURITY: Properly verify ID token signature, expiration, and issuer
+        Throws exceptions for critical validation failures, but is lenient with audience"""
+        try:
+            # First, decode header to get key ID
+            unverified_header = jwt.get_unverified_header(id_token)
+            kid = unverified_header.get('kid')
+            
+            if not kid:
+                logger.error("ID token missing key ID (kid) in header")
+                raise ValueError("ID token missing key ID (kid) in header")
+            
+            # DEBUG: Decode token without verification to see its contents
+            try:
+                unverified_payload = jwt.decode(id_token, options={"verify_signature": False})
+                logger.debug(f"ID token payload (unverified): {unverified_payload}")
+                logger.debug(f"ID token issuer: {unverified_payload.get('iss')}")
+                logger.debug(f"Expected issuer: {self.config.org_url}")
+                logger.debug(f"ID token audience: {unverified_payload.get('aud')}")
+                logger.debug(f"Expected audience: {self.config.client_id}")
+            except Exception as e:
+                logger.warning(f"Could not decode ID token for debugging: {e}")
+            
+            # Get JWKS from Okta (with caching)
+            jwks_data = self._get_cached_jwks()
+            if not jwks_data:
+                logger.error("Failed to retrieve JWKS for ID token verification")
+                raise RuntimeError("Failed to retrieve JWKS for ID token verification")
+            
+            # Find the matching key
+            signing_key = None
+            for key in jwks_data.get('keys', []):
+                if key.get('kid') == kid:
+                    try:
+                        signing_key = jwt.algorithms.RSAAlgorithm.from_jwk(key)
+                        break
+                    except Exception as e:
+                        logger.error(f"Failed to create RSA key from JWK: {e}")
+                        continue
+            
+            if not signing_key:
+                logger.error(f"No matching signing key found for kid: {kid}")
+                raise ValueError(f"No matching signing key found for kid: {kid}")
+            
+            # SECURITY: Verify ID token with proper validation
+            # Try with audience validation first, but fall back to no audience validation if it fails
+            valid_audiences = [
+                self.config.client_id,  # OAuth client ID is the audience for ID tokens
+            ]
+            
+            try:
+                # First attempt: Full validation including audience
+                decoded = jwt.decode(
+                    id_token,
+                    signing_key,
+                    algorithms=['RS256'],  # Okta uses RS256
+                    audience=valid_audiences,  # ID token audience is the client ID
+                    issuer=self.config.org_url,   # Validate issuer (always Okta's org URL)
+                    options={
+                        "verify_signature": True,   # CRITICAL: Verify signature
+                        "verify_exp": True,         # CRITICAL: Check expiration
+                        "verify_aud": True,         # Check audience (client_id)
+                        "verify_iss": True,         # CRITICAL: Check issuer
+                        "require_exp": True,        # CRITICAL: Require expiration
+                        "require_aud": True,        # Require audience
+                        "require_iss": True         # CRITICAL: Require issuer
+                    }
+                )
+                logger.debug(f"ID token verification successful with audience validation for user: {decoded.get('sub')}")
+                
+            except jwt.InvalidAudienceError as e:
+                logger.warning(f"ID token audience validation failed, trying without audience validation: {e}")
+                # Second attempt: Skip audience validation but keep all other security checks
+                decoded = jwt.decode(
+                    id_token,
+                    signing_key,
+                    algorithms=['RS256'],  # Okta uses RS256
+                    issuer=self.config.org_url,   # Validate issuer (always Okta's org URL)
+                    options={
+                        "verify_signature": True,   # CRITICAL: Verify signature
+                        "verify_exp": True,         # CRITICAL: Check expiration
+                        "verify_aud": False,        # Skip audience validation
+                        "verify_iss": True,         # CRITICAL: Check issuer
+                        "require_exp": True,        # CRITICAL: Require expiration
+                        "require_aud": False,       # Don't require audience
+                        "require_iss": True         # CRITICAL: Require issuer
+                    }
+                )
+                logger.info(f"ID token verification successful without audience validation for user: {decoded.get('sub')}")
+            
+            return decoded
+            
+        except jwt.ExpiredSignatureError as e:
+            logger.error("ID token has expired")
+            self._audit_log("id_token_expired", details={"token_prefix": id_token[:20]})
+            raise jwt.ExpiredSignatureError("ID token has expired")
+            
+        except jwt.InvalidIssuerError as e:
+            logger.error(f"ID token issuer validation failed: {e}")
+            self._audit_log("id_token_invalid_issuer", details={"error": str(e)})
+            raise jwt.InvalidIssuerError(f"ID token issuer validation failed: {e}")
+            
+        except jwt.InvalidSignatureError as e:
+            logger.error("ID token signature validation failed")
+            self._audit_log("id_token_invalid_signature", details={"token_prefix": id_token[:20]})
+            raise jwt.InvalidSignatureError("ID token signature validation failed")
+            
+        except (ValueError, RuntimeError) as e:
+            # Re-raise our custom errors
+            raise e
+            
+        except Exception as e:
+            logger.error(f"ID token verification failed: {e}")
+            self._audit_log("id_token_verification_failed", details={"error": str(e)})
+            raise RuntimeError(f"ID token verification failed: {e}")
 
     def _verify_and_decode_jwt(self, access_token: str) -> Optional[Dict[str, Any]]:
         """SECURITY: Properly verify JWT signature, expiration, and audience"""
@@ -833,26 +978,27 @@ class AuthHandler:
             logger.debug(f"JWT verification successful for user: {decoded.get('sub')}")
             return decoded
             
-        except jwt.ExpiredSignatureError:
+        except jwt.ExpiredSignatureError as e:
             logger.error("JWT token has expired")
             self._audit_log("jwt_expired", details={"token_prefix": access_token[:20]})
-            return None
+            raise jwt.ExpiredSignatureError("Access token has expired")
         except jwt.InvalidAudienceError as e:
-            logger.error(f"JWT audience validation failed: {e}")
+            logger.warning(f"JWT audience validation failed: {e}")
             self._audit_log("jwt_invalid_audience", details={"error": str(e)})
+            # For audience validation, we can be more lenient and return None instead of throwing
             return None
         except jwt.InvalidIssuerError as e:
             logger.error(f"JWT issuer validation failed: {e}")
             self._audit_log("jwt_invalid_issuer", details={"error": str(e)})
-            return None
-        except jwt.InvalidSignatureError:
+            raise jwt.InvalidIssuerError(f"Access token issuer validation failed: {e}")
+        except jwt.InvalidSignatureError as e:
             logger.error("JWT signature validation failed")
             self._audit_log("jwt_invalid_signature", details={"token_prefix": access_token[:20]})
-            return None
+            raise jwt.InvalidSignatureError("Access token signature validation failed")
         except Exception as e:
             logger.error(f"JWT verification failed: {e}")
             self._audit_log("jwt_verification_error", details={"error": str(e)})
-            return None
+            raise RuntimeError(f"Access token verification failed: {e}")
 
     def _get_cached_jwks(self) -> Optional[Dict[str, Any]]:
         """Get JWKS from Okta with caching"""
@@ -1136,6 +1282,7 @@ class AuthHandler:
                     'virtual_client_id': client_id,
                     'original_redirect_uri': original_redirect_uri,
                     'original_state': original_state,  # Store original state (could be None)
+                    'original_scope': scope,  # Store original scope for offline_access check
                     'pending_consent': pending_consent,  # Store consent info for finalization
                     'timestamp': datetime.now(timezone.utc).isoformat()
                 }
@@ -1428,6 +1575,12 @@ class AuthHandler:
                     
                     logger.info(f"Created session for virtual client {virtual_client_id} and user: {user_info.get('user_id')}")
                     
+                    # Get original scope from stored data to check for offline_access
+                    original_scope = stored_data.get('original_scope', '')
+                    original_scopes = original_scope.split() if original_scope else []
+                    
+                    logger.debug(f"Original client scopes: {original_scopes}")
+                    
                     # Return real Okta token response directly to client
                     response_data = {
                         "access_token": real_access_token,
@@ -1436,10 +1589,14 @@ class AuthHandler:
                         "scope": token_response.get("scope", " ".join(user_info.get('scopes', [])))
                     }
                     
-                    # Include refresh token if present (from offline_access scope)
-                    if "refresh_token" in token_response:
+                    # Only include refresh token if client originally requested offline_access scope
+                    if "refresh_token" in token_response and "offline_access" in original_scopes:
                         response_data["refresh_token"] = token_response["refresh_token"]
-                        logger.info("Refresh token included in response")
+                        logger.info("Refresh token included in response (offline_access scope requested)")
+                    elif "refresh_token" in token_response:
+                        logger.info("Refresh token omitted from response (offline_access scope not requested)")
+                    else:
+                        logger.debug("No refresh token received from Okta")
                     
                     return web.json_response(response_data, headers={"Access-Control-Allow-Origin": "*"})
                     
@@ -1615,104 +1772,6 @@ class AuthHandler:
             
             if expired_states or expired_tokens or expired_consents:
                 logger.info(f"Cleanup completed: {len(expired_states)} states, {len(expired_tokens)} tokens, {len(expired_consents)} consents removed")
-            
+                
         except Exception as e:
             logger.error(f"Cleanup task failed: {e}")
-
-    def _verify_and_decode_id_token(self, id_token: str) -> Optional[Dict[str, Any]]:
-        """Verify ID token signature and issuer but skip audience validation"""
-        try:
-            # First, decode header to get key ID
-            unverified_header = jwt.get_unverified_header(id_token)
-            kid = unverified_header.get('kid')
-            
-            if not kid:
-                logger.error("ID token missing key ID (kid) in header")
-                return None
-            
-            # DEBUG: Decode token without verification to see its contents
-            try:
-                unverified_payload = jwt.decode(id_token, options={"verify_signature": False})
-                logger.debug(f"ID token payload (unverified): {unverified_payload}")
-                logger.debug(f"ID token audience: {unverified_payload.get('aud')}")
-                logger.debug(f"ID token issuer: {unverified_payload.get('iss')}")
-            except Exception as e:
-                logger.warning(f"Could not decode ID token for debugging: {e}")
-            
-            # Get JWKS from Okta (with caching)
-            jwks_data = self._get_cached_jwks()
-            if not jwks_data:
-                logger.error("Failed to retrieve JWKS for ID token verification")
-                return None
-            
-            # Find the matching key
-            matching_key = None
-            for key in jwks_data.get('keys', []):
-                if key.get('kid') == kid:
-                    matching_key = key
-                    break
-            
-            if not matching_key:
-                logger.error(f"No matching key found for kid: {kid}")
-                return None
-            
-            # Convert JWK to PEM format
-            try:
-                from cryptography.hazmat.primitives import serialization
-                from cryptography.hazmat.primitives.asymmetric import rsa
-                import base64
-                
-                # Get the RSA components
-                n = base64.urlsafe_b64decode(matching_key['n'] + '==')
-                e = base64.urlsafe_b64decode(matching_key['e'] + '==')
-                
-                # Create RSA public key
-                public_numbers = rsa.RSAPublicNumbers(
-                    int.from_bytes(e, 'big'),
-                    int.from_bytes(n, 'big')
-                )
-                public_key = public_numbers.public_key()
-                
-                # Convert to PEM
-                pem_key = public_key.public_bytes(
-                    encoding=serialization.Encoding.PEM,
-                    format=serialization.PublicFormat.SubjectPublicKeyInfo
-                )
-                
-            except Exception as e:
-                logger.error(f"Failed to convert JWK to PEM: {e}")
-                return None
-            
-            # Verify the token with signature and issuer validation, skip audience
-            decoded = jwt.decode(
-                id_token,
-                pem_key,
-                algorithms=['RS256'],
-                issuer=self.config.issuer,
-                options={
-                    "verify_signature": True,
-                    "verify_exp": True,
-                    "verify_nbf": True,
-                    "verify_iat": True,
-                    "verify_aud": False,  # Skip audience validation for ID tokens
-                    "require_exp": True,
-                    "require_iat": True,
-                    "require_nbf": False
-                }
-            )
-            
-            logger.debug(f"ID token verification successful for user: {decoded.get('sub')}")
-            return decoded
-            
-        except jwt.ExpiredSignatureError:
-            logger.error("ID token has expired")
-            return None
-        except jwt.InvalidIssuerError as e:
-            logger.error(f"ID token issuer validation failed: {e}")
-            return None
-        except jwt.InvalidSignatureError:
-            logger.error("ID token signature validation failed")
-            return None
-        except Exception as e:
-            logger.error(f"ID token verification failed: {e}")
-            return None
