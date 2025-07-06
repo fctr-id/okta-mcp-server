@@ -23,6 +23,7 @@ import contextvars
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, urlparse
+from pathlib import Path
 
 # Load environment variables
 try:
@@ -71,7 +72,20 @@ class OAuthSessionManager:
         # Thread-safe current user storage for FastMCP middleware access
         self.current_user_context: contextvars.ContextVar = contextvars.ContextVar('current_user', default=None)
         
+        # Load persisted tokens from file
+        self._load_persisted_tokens()
+        
         logger.info("OAuth session manager initialized with JWT validation")
+    
+    def _load_persisted_tokens(self):
+        """Load persisted tokens from file (stub for future implementation)
+        
+        This is a placeholder for future file-based persistence to survive server restarts.
+        Currently tokens are only stored in memory.
+        """
+        # TODO: Implement file-based token persistence
+        # For now, tokens are only stored in memory and lost on restart
+        pass
     
     def set_current_user(self, user_info: Optional[Dict[str, Any]]):
         """Set current user in context for FastMCP middleware access"""
@@ -429,7 +443,7 @@ class FastMCPOAuthServer:
             response.headers["Access-Control-Allow-Origin"] = "*"
             return self.session_manager.add_security_headers(response)
         
-        @self.mcp.custom_route("/oauth2/v1/clients", methods=["POST", "OPTIONS"])
+        @self.mcp.custom_route("/oauth2/v1/clients", methods=["GET", "POST", "OPTIONS"])
         async def oauth_dynamic_client_registration(request: Request) -> JSONResponse:
             """OAuth 2.0 Dynamic Client Registration (RFC 7591)"""
             if request.method == "OPTIONS":
@@ -437,10 +451,23 @@ class FastMCPOAuthServer:
                     {},
                     headers={
                         "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "POST, OPTIONS",
+                        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                         "Access-Control-Allow-Headers": "Content-Type"
                     }
                 )
+            
+            if request.method == "GET":
+                # Return information about the dynamic client registration endpoint
+                # This is not part of RFC 7591 but some clients expect it for discovery
+                response_data = {
+                    "endpoint": "/oauth2/v1/clients",
+                    "methods_supported": ["POST"],
+                    "description": "OAuth 2.0 Dynamic Client Registration endpoint",
+                    "documentation_url": "https://tools.ietf.org/html/rfc7591"
+                }
+                response = JSONResponse(response_data)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return self.session_manager.add_security_headers(response)
             
             try:
                 data = await request.json()
@@ -1175,7 +1202,7 @@ class FastMCPOAuthServer:
         # Only include refresh token if client originally requested offline_access scope (RFC 6749 Section 6 compliance)
         if virtual_refresh_token:
             response_data["refresh_token"] = virtual_refresh_token
-            logger.info("Refresh token included in response (offline_access scope requested)")
+            logger.info(f"Refresh token included in response for client {client_id}")
         else:
             logger.info("Refresh token omitted from response (offline_access scope not requested)")
         
