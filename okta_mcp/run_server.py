@@ -80,6 +80,23 @@ def run_oauth_server(host: str = "localhost", port: int = 3001):
         return 1
 
 
+def run_fastmcp_oauth_server(host: str = "localhost", port: int = 3001):
+    """Run the unified FastMCP OAuth server"""
+    try:
+        from okta_mcp.fastmcp_oauth_server import FastMCPOAuthServer
+        
+        logger.info(f"Starting unified FastMCP OAuth server on {host}:{port}")
+        server = FastMCPOAuthServer()
+        
+        # Run the server
+        asyncio.run(server.run(host=host, port=port))
+        return 0
+        
+    except Exception as e:
+        logger.error(f"Error running FastMCP OAuth server: {e}")
+        return 1
+
+
 def run_main_server_process(transport: str, host: str, port: int):
     """Wrapper for main server in separate process"""
     return run_main_server(transport, host, port)
@@ -90,6 +107,11 @@ def run_oauth_server_process(host: str, port: int):
     return run_oauth_server(host, port)
 
 
+def run_fastmcp_oauth_server_process(host: str, port: int):
+    """Wrapper for FastMCP OAuth server in separate process"""
+    return run_fastmcp_oauth_server(host, port)
+
+
 def main():
     """Main entry point"""
     parser = argparse.ArgumentParser(
@@ -98,10 +120,11 @@ def main():
         epilog="""
 Examples:
     %(prog)s                                   # Run main MCP server (STDIO)
-    %(prog)s mcp-with-auth                      # Run OAuth proxy server only
+    %(prog)s mcp-with-auth                      # Run old OAuth proxy server only
+    %(prog)s fastmcp-oauth                      # Run unified FastMCP OAuth server (RECOMMENDED)
     %(prog)s --both                            # Run both servers concurrently
     %(prog)s --danger-mcp-no-auth --port 3000  # Run main server with HTTP transport (no auth)
-    %(prog)s mcp-with-auth --oauth-port 3001    # Run OAuth server on custom port
+    %(prog)s fastmcp-oauth --oauth-port 3001    # Run FastMCP OAuth server on custom port
         """
     )
     
@@ -110,8 +133,8 @@ Examples:
     server_group.add_argument(
         "command", 
         nargs="?",
-        choices=["mcp-with-auth"],
-        help="mcp-with-auth: Run OAuth proxy server only (HTTP transport)"
+        choices=["mcp-with-auth", "fastmcp-oauth"],
+        help="mcp-with-auth: Run old OAuth proxy server | fastmcp-oauth: Run unified FastMCP OAuth server"
     )
     server_group.add_argument(
         "--both", 
@@ -154,9 +177,14 @@ Examples:
     
     try:
         if args.command == "mcp-with-auth":
-            # Run OAuth proxy server only
-            logger.info("Running OAuth proxy server only")
+            # Run old OAuth proxy server only  
+            logger.info("Running old OAuth proxy server")
             return run_oauth_server(args.oauth_host, args.oauth_port)
+            
+        elif args.command == "fastmcp-oauth":
+            # Run unified FastMCP OAuth server
+            logger.info("Running unified FastMCP OAuth server")
+            return run_fastmcp_oauth_server(args.oauth_host, args.oauth_port)
             
         elif args.both:
             # Run both servers concurrently using multiprocessing
