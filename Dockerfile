@@ -8,6 +8,9 @@
 # Build SSE variant (deprecated, for legacy clients)
 #docker build --target sse -t okta-mcp-server:sse .
 
+# Build FastMCP OAuth variant (unified OAuth + MCP server)
+#docker build --target fastmcp-oauth -t okta-mcp-server:fastmcp-oauth .
+
 
 FROM python:3.13-alpine AS base
 
@@ -59,8 +62,11 @@ ENV TRANSPORT_TYPE=sse
 EXPOSE 3000
 ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
 
-# OAuth Proxy variant (for remote deployment with OAuth protection)
-FROM base AS oauth-proxy
-ENV TRANSPORT_TYPE=oauth-proxy
+# FastMCP OAuth variant (unified OAuth + MCP server on one port)
+FROM base AS fastmcp-oauth
+ENV TRANSPORT_TYPE=fastmcp-oauth
 EXPOSE 3001
-ENTRYPOINT ["python", "-m", "okta_mcp.run_server", "mcp-with-auth", "--host=0.0.0.0", "--port=3001"]
+ENTRYPOINT ["python", "-m", "okta_mcp.fastmcp_oauth_server", "--host=0.0.0.0", "--port=3001"]
+
+# OAuth Proxy variant (alias for backward compatibility)
+FROM fastmcp-oauth AS oauth-proxy
