@@ -127,11 +127,11 @@ except jwt.InvalidIssuerError as e:
 - ✅ **Audit Logging**: All refresh token issuance decisions logged for security monitoring
 
 ```python
-# Only include refresh token if client originally requested offline_access scope
-if "refresh_token" in token_response and "offline_access" in original_scopes:
-    response_data["refresh_token"] = token_response["refresh_token"]
+# Only include refresh token if client originally requested offline_access scope (RFC 6749 Section 6 compliance)
+if "offline_access" in original_scopes:
+    response_data["refresh_token"] = virtual_refresh_token
     logger.info("Refresh token included in response (offline_access scope requested)")
-elif "refresh_token" in token_response:
+else:
     logger.info("Refresh token omitted from response (offline_access scope not requested)")
 ```
 
@@ -184,6 +184,8 @@ elif "refresh_token" in token_response:
 - **X-Frame-Options**: `DENY` - Prevents clickjacking attacks
 - **X-XSS-Protection**: `1; mode=block` - Enables browser XSS protection
 - **Referrer-Policy**: `strict-origin-when-cross-origin` - Controls referrer information leakage
+- **Content-Security-Policy**: `default-src 'self'...` - Prevents XSS and code injection attacks
+- **Strict-Transport-Security**: `max-age=31536000; includeSubDomains; preload` - Forces HTTPS in production
 
 ### CORS (Cross-Origin Resource Sharing)
 - **Controlled Access**: Appropriate CORS headers for legitimate cross-origin requests
@@ -265,10 +267,11 @@ elif "refresh_token" in token_response:
 The Okta MCP OAuth Proxy Server implements a comprehensive security framework that exceeds both MCP and OAuth 2.1 requirements. The implementation provides:
 
 - **Defense in Depth**: Multiple layers of security controls protect against various attack vectors
-- **OAuth 2.1 Excellence**: Full adherence to latest OAuth specifications including refresh token scope validation
+- **OAuth 2.1 Excellence**: Full adherence to latest OAuth specifications including refresh token scope validation with conditional response and audit logging
 - **Compliance Excellence**: Full adherence to latest security specifications and best practices
 - **Enterprise Readiness**: Audit trails, monitoring, and scalability features for production deployment
 - **Developer Experience**: Security that doesn't compromise usability for legitimate MCP clients
+- **Comprehensive Security Headers**: Complete protection suite including CSP, HSTS, and cache control
 
 This security-first approach ensures that organizations can safely expose Okta-protected resources to MCP clients while maintaining full visibility and control over access patterns and permissions.
 

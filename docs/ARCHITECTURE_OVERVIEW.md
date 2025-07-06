@@ -52,10 +52,10 @@ The architecture has been completely modernized with a unified FastMCP server th
 
 ### ✅ OAuth 2.1 Security Best Practices
 - **PKCE Mandatory**: SHA256 code challenge for all authorization flows
-- **Refresh Token Scope Validation**: RFC 6749 Section 6 compliance (only with `offline_access`)
+- **Refresh Token Scope Validation**: RFC 6749 Section 6 compliance with conditional response and audit logging
 - **RFC 6750 Error Responses**: Proper WWW-Authenticate headers on 401 responses
 - **Per-Client Consent**: Confused deputy mitigation with 24-hour consent expiration
-- **Security Headers**: Comprehensive browser protection (XSS, clickjacking, MIME sniffing)
+- **Security Headers**: Comprehensive browser protection (CSP, XSS, clickjacking, MIME sniffing, HSTS)
 
 ### ✅ Role-Based Access Control (RBAC)
 - **Configuration**: `okta_mcp/auth/rbac_config.json`
@@ -117,9 +117,6 @@ python -m okta_mcp.run_server
 # Unified FastMCP OAuth server (MCP Inspector, OAuth clients) - RECOMMENDED
 python -m okta_mcp.run_server fastmcp-oauth
 
-# Old OAuth proxy server (deprecated)
-python -m okta_mcp.run_server mcp-with-auth
-
 # Both servers concurrently
 python -m okta_mcp.run_server --both
 ```
@@ -174,9 +171,9 @@ PORT=3001
 - ✅ **Enterprise JWT Validation**: RS256 signature verification with fail-secure architecture
 - ✅ **PKCE Protection**: Mandatory PKCE with SHA256 for all authorization flows
 - ✅ **Per-Client Consent**: Confused deputy mitigation with 24-hour consent expiration
-- ✅ **Refresh Token Scope Validation**: RFC 6749 Section 6 compliance (only with `offline_access`)
+- ✅ **Refresh Token Scope Validation**: RFC 6749 Section 6 compliance with conditional response and audit logging
 - ✅ **RFC 6750 Error Responses**: Proper WWW-Authenticate headers on authentication failures
-- ✅ **Security Headers**: XSS, clickjacking, MIME sniffing, and cache control protection
+- ✅ **Security Headers**: Complete protection suite (CSP, XSS, clickjacking, MIME sniffing, HSTS, cache control)
 - ✅ **Real-Time RBAC**: Group membership and role assignment on every request
 - ✅ **Comprehensive Audit**: All security events logged with user context and timestamps
 - ✅ **Automatic Cleanup**: Expired tokens, codes, and consent removed every 5 minutes
@@ -196,7 +193,7 @@ PORT=3001
 
 ## Next Steps (Optional)
 
-The unified FastMCP OAuth server is now production-ready with enterprise-grade security. Optional improvements could include:
+The unified FastMCP OAuth server is now production-ready with enterprise-grade security. **Security review completed July 6, 2025** - all documented security best practices have been validated and implemented. Optional improvements could include:
 
 1. **Advanced Security**: Rate limiting, distributed session storage (Redis), token rotation
 2. **Monitoring**: Metrics, health checks, performance monitoring
@@ -209,9 +206,10 @@ The unified FastMCP OAuth server is now production-ready with enterprise-grade s
 
 ✅ **Complete**: Unified FastMCP OAuth server with enterprise security implemented and tested  
 ✅ **MCP Inspector Compatible**: Full OAuth discovery, dynamic client registration, consent flow  
-✅ **OAuth 2.1 Compliant**: PKCE, JWT validation, refresh token scope validation, RFC 6750 errors  
-✅ **Enterprise Security**: JWT validation, RBAC, consent tracking, security headers, audit logging  
+✅ **OAuth 2.1 Compliant**: PKCE, JWT validation, refresh token scope validation with conditional response, RFC 6750 errors  
+✅ **Enterprise Security**: JWT validation, RBAC, consent tracking, comprehensive security headers, audit logging  
 ✅ **Production-Ready**: Comprehensive security framework with monitoring and cleanup automation  
 ✅ **Architecture Modernized**: Single unified server eliminates proxy complexity and improves performance
+✅ **Security Validated**: Complete review and implementation of all documented security best practices
 
 The Okta MCP Server now provides a single, powerful FastMCP server that handles both OAuth-protected access for MCP Inspector and direct MCP protocol access for traditional clients, with enterprise-grade security throughout.

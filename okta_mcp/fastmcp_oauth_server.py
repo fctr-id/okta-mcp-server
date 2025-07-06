@@ -17,6 +17,9 @@ import logging
 import secrets
 import json
 import httpx
+import hashlib
+import base64
+import contextvars
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlencode, urlparse
@@ -61,11 +64,12 @@ class OAuthSessionManager:
         self.client_secrets: Dict[str, str] = {}  # client_id -> client_secret
         self.authorization_codes: Dict[str, AuthorizationCode] = {}
         self.user_consents: Dict[str, UserConsent] = {}
-        self.tokens: Dict[str, Dict[str, Any]] = {}
+        self.tokens: Dict[str, Dict[str, Any]] = {}  # Virtual tokens for clients
         self.state_store: Dict[str, Any] = {}
+        self.refresh_token_mappings: Dict[str, Dict[str, Any]] = {}  # Virtual refresh token mappings
+        self.real_token_store: Dict[str, Dict[str, Any]] = {}  # Real Okta tokens (secure storage)
         
         # Thread-safe current user storage for FastMCP middleware access
-        import contextvars
         self.current_user_context: contextvars.ContextVar = contextvars.ContextVar('current_user', default=None)
         
         logger.info("OAuth session manager initialized with JWT validation")
@@ -175,7 +179,8 @@ class OAuthSessionManager:
                 "X-Content-Type-Options": "nosniff",
                 "X-Frame-Options": "DENY",
                 "X-XSS-Protection": "1; mode=block",
-                "Referrer-Policy": "strict-origin-when-cross-origin"
+                "Referrer-Policy": "strict-origin-when-cross-origin",
+                "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"
             }
         )
     
@@ -186,9 +191,14 @@ class OAuthSessionManager:
             "X-Frame-Options": "DENY", 
             "X-XSS-Protection": "1; mode=block",
             "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
             "Cache-Control": "no-store, no-cache, must-revalidate",
             "Pragma": "no-cache"
         }
+        
+        # Add HSTS for HTTPS in production
+        if self.config.require_https:
+            security_headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload"
         
         for header, value in security_headers.items():
             response.headers[header] = value
@@ -566,7 +576,6 @@ class FastMCPOAuthServer:
                     
                     # Generate PKCE parameters for Okta
                     code_verifier = secrets.token_urlsafe(64)
-                    import hashlib, base64
                     okta_code_challenge = base64.urlsafe_b64encode(
                         hashlib.sha256(code_verifier.encode('ascii')).digest()
                     ).decode('ascii').strip('=')
@@ -764,7 +773,7 @@ class FastMCPOAuthServer:
         
         @self.mcp.custom_route("/oauth/token", methods=["POST", "OPTIONS"])
         async def oauth_token_virtual(request: Request) -> JSONResponse:
-            """Virtual OAuth token endpoint"""
+            """Virtual OAuth token endpoint - handles authorization_code and refresh_token grants"""
             if request.method == "OPTIONS":
                 return Response(
                     status_code=200,
@@ -779,95 +788,16 @@ class FastMCPOAuthServer:
                 # Parse form data
                 form_data = await request.form()
                 grant_type = form_data.get("grant_type")
-                code = form_data.get("code")
-                client_id = form_data.get("client_id")
-                code_verifier = form_data.get("code_verifier")
                 
-                if grant_type != "authorization_code":
+                if grant_type == "authorization_code":
+                    return await self._handle_authorization_code_grant(request, form_data)
+                elif grant_type == "refresh_token":
+                    return await self._handle_refresh_token_grant(request, form_data)
+                else:
                     response = JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
                     response.headers["Access-Control-Allow-Origin"] = "*"
                     return self.session_manager.add_security_headers(response)
                     
-                # Validate authorization code
-                if code not in self.session_manager.authorization_codes:
-                    response = JSONResponse({"error": "invalid_grant"}, status_code=400)
-                    response.headers["Access-Control-Allow-Origin"] = "*"
-                    return self.session_manager.add_security_headers(response)
-                    
-                auth_code_obj = self.session_manager.authorization_codes[code]
-                
-                # Verify client and expiration
-                if auth_code_obj["client_id"] != client_id:
-                    response = JSONResponse({"error": "invalid_client"}, status_code=400)
-                    response.headers["Access-Control-Allow-Origin"] = "*"
-                    return self.session_manager.add_security_headers(response)
-                    
-                if datetime.now(timezone.utc) > auth_code_obj["expires_at"]:
-                    response = JSONResponse({"error": "invalid_grant"}, status_code=400)
-                    response.headers["Access-Control-Allow-Origin"] = "*"
-                    return self.session_manager.add_security_headers(response)
-                
-                # Verify PKCE if provided
-                if code_verifier and auth_code_obj.get("code_challenge"):
-                    import hashlib, base64
-                    computed_challenge = base64.urlsafe_b64encode(
-                        hashlib.sha256(code_verifier.encode('ascii')).digest()
-                    ).decode('ascii').strip('=')
-                    
-                    if computed_challenge != auth_code_obj["code_challenge"]:
-                        response = JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
-                        response.headers["Access-Control-Allow-Origin"] = "*"
-                        return self.session_manager.add_security_headers(response)
-                
-                # Generate virtual access token
-                access_token = secrets.token_urlsafe(32)
-                refresh_token = secrets.token_urlsafe(32) if "offline_access" in auth_code_obj["scopes"] else None
-                
-                expires_in = 3600  # 1 hour
-                token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
-                
-                # Store token with user context
-                user_id = auth_code_obj["user_id"]
-                token_data = {
-                    "access_token": access_token,
-                    "token_type": "Bearer",
-                    "expires_in": expires_in,
-                    "expires_at": token_expires_at,
-                    "scope": auth_code_obj["scopes"],
-                    "client_id": client_id,
-                    "user_id": user_id,
-                    "refresh_token": refresh_token
-                }
-                
-                self.session_manager.tokens[access_token] = token_data
-                
-                # Clean up used authorization code
-                del self.session_manager.authorization_codes[code]
-                
-                # Prepare response
-                response_data = {
-                    "access_token": access_token,
-                    "token_type": "Bearer",
-                    "expires_in": expires_in,
-                    "scope": " ".join(auth_code_obj["scopes"])
-                }
-                
-                if refresh_token:
-                    response_data["refresh_token"] = refresh_token
-                
-                logger.info(f"Virtual access token issued for client {client_id}, user {user_id}")
-                audit_log("access_token_issued", 
-                         user_id=user_id,
-                         details={
-                             "client_id": client_id,
-                             "scopes": auth_code_obj["scopes"],
-                             "has_refresh_token": bool(refresh_token)
-                         })
-                
-                response = JSONResponse(response_data)
-                response.headers["Access-Control-Allow-Origin"] = "*"
-                return self.session_manager.add_security_headers(response)
-                
             except Exception as e:
                 logger.error(f"Virtual token error: {e}")
                 response = JSONResponse({"error": "server_error"}, status_code=500)
@@ -981,34 +911,66 @@ class FastMCPOAuthServer:
                     
                     tokens = token_response.json()
                     access_token = tokens.get('access_token')
+                    id_token = tokens.get('id_token')
+                    refresh_token = tokens.get('refresh_token')
                     
-                    # Get user info from Okta
-                    userinfo_url = f"{self.oauth_config.org_url}/oauth2/v1/userinfo"
-                    userinfo_response = await client.get(
-                        userinfo_url,
-                        headers={'Authorization': f'Bearer {access_token}'}
-                    )
+                    # SECURITY: Validate ID token with proper JWT validation
+                    if id_token:
+                        id_token_result = await self.session_manager.jwt_validator.validate_id_token(id_token)
+                        if not id_token_result.is_valid:
+                            logger.error(f"ID token validation failed: {id_token_result.error}")
+                            return Response(f"ID token validation failed: {id_token_result.error}", status_code=400)
+                        
+                        # Extract user info from validated ID token (more secure than userinfo endpoint)
+                        user_info = self.session_manager.jwt_validator.get_user_info_from_claims(id_token_result.user_claims)
+                        logger.info(f"ID token validation successful for user: {user_info.get('email')}")
+                    else:
+                        # Fallback to userinfo endpoint if no ID token
+                        userinfo_url = f"{self.oauth_config.org_url}/oauth2/v1/userinfo"
+                        userinfo_response = await client.get(
+                            userinfo_url,
+                            headers={'Authorization': f'Bearer {access_token}'}
+                        )
+                        
+                        if userinfo_response.status_code != 200:
+                            logger.error(f"Userinfo request failed: {userinfo_response.text}")
+                            return Response("Failed to get user info", status_code=500)
+                        
+                        user_info = userinfo_response.json()
                     
-                    if userinfo_response.status_code != 200:
-                        logger.error(f"Userinfo request failed: {userinfo_response.text}")
-                        return Response("Failed to get user info", status_code=500)
-                    
-                    user_info = userinfo_response.json()
+                    # SECURITY: Validate refresh token if present
+                    if refresh_token:
+                        refresh_token_result = await self.session_manager.jwt_validator.validate_refresh_token(refresh_token)
+                        if not refresh_token_result.is_valid:
+                            logger.error(f"Refresh token validation failed: {refresh_token_result.error}")
+                            # Don't fail the flow, but log the issue
+                            refresh_token = None
                 
-                # Store user info in session
+                # Store user info in session (NO real Okta tokens stored in session)
                 session_user_info = {
                     'user_id': user_info.get('sub'),
                     'email': user_info.get('email'),
                     'name': user_info.get('name'),
                     'groups': user_info.get('groups', []),
                     'scopes': tokens.get('scope', '').split(),
-                    'access_token': access_token,
                     'authenticated': True
+                    # NOTE: Real Okta tokens stored separately for security
                 }
                 
                 # Map user role
                 groups = user_info.get('groups', [])
                 session_user_info['rbac_role'] = self.session_manager.role_mapper.get_user_role(groups)
+                
+                # SECURITY: Store real Okta tokens securely (separate from user session)
+                # This allows us to refresh tokens and validate user state with Okta
+                user_id = user_info.get('sub')
+                self.session_manager.real_token_store[user_id] = {
+                    'access_token': access_token,
+                    'refresh_token': refresh_token,  # Store real refresh token securely
+                    'id_token': id_token,
+                    'expires_at': datetime.now(timezone.utc) + timedelta(seconds=tokens.get('expires_in', 3600)),
+                    'updated_at': datetime.now(timezone.utc)
+                }
                 
                 # Store in session (if available) and memory
                 try:
@@ -1080,445 +1042,289 @@ class FastMCPOAuthServer:
         
         logger.info("OAuth routes registered successfully")
     
-    def _get_consent_template(self, client_id: str, client_name: str, redirect_uri: str, 
-                             state: str, scope: str, code_challenge: str, user_agent: str = '') -> str:
-        """Generate the modern, business-appropriate consent page HTML template"""
+    async def _handle_authorization_code_grant(self, request: Request, form_data) -> JSONResponse:
+        """Handle authorization_code grant type"""
+        code = form_data.get("code")
+        client_id = form_data.get("client_id")
+        code_verifier = form_data.get("code_verifier")
         
-        # Get client display info
-        client_display_info = self._get_client_display_info(redirect_uri, user_agent)
+        # Validate authorization code
+        if code not in self.session_manager.authorization_codes:
+            response = JSONResponse({"error": "invalid_grant"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+            
+        auth_code_obj = self.session_manager.authorization_codes[code]
         
-        # Extract client domain from redirect URI
-        client_domain = self._get_redirect_domain(redirect_uri) if redirect_uri else "Unknown Domain"
+        # Verify client and expiration
+        if auth_code_obj["client_id"] != client_id:
+            response = JSONResponse({"error": "invalid_client"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+            
+        if datetime.now(timezone.utc) > auth_code_obj["expires_at"]:
+            response = JSONResponse({"error": "invalid_grant"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
         
-        # Get client type for display (optional, only show if meaningful)
-        client_type_display = ""
-        if user_agent:
-            client_type = self._identify_client_type(user_agent)
-            if client_type and not client_type.startswith("Unknown"):
-                client_type_display = client_type
+        # Verify PKCE if provided
+        if code_verifier and auth_code_obj.get("code_challenge"):
+            computed_challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode('ascii')).digest()
+            ).decode('ascii').strip('=')
+            
+            if computed_challenge != auth_code_obj["code_challenge"]:
+                response = JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return self.session_manager.add_security_headers(response)
         
-        # Parse scopes for display
-        server_scopes = scope.split() if scope else []
-        okta_domain = self.oauth_config.org_url.replace('https://', '').replace('http://', '')
+        # Generate virtual access token (client gets virtual token, we keep real Okta token)
+        virtual_access_token = secrets.token_urlsafe(32)
+        virtual_refresh_token = secrets.token_urlsafe(32) if "offline_access" in auth_code_obj["scopes"] else None
         
-        return f"""
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Authorization Request</title>
-            <link rel="preconnect" href="https://fonts.googleapis.com">
-            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-            <style>
-                * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-                
-                body {{ 
-                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-                    background: linear-gradient(180deg, #e5eaf5, #f0f4fb);
-                    min-height: 100vh;
-                    position: relative;
-                    overflow-y: auto;
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
-                    font-optical-sizing: auto;
-                    text-rendering: optimizeLegibility;
-                    -webkit-font-smoothing: antialiased;
-                    -moz-osx-font-smoothing: grayscale;
-                }}
-                
-                .consent-card {{
-                    background: white;
-                    border-radius: 20px;
-                    box-shadow: 0 20px 60px rgba(0,0,0,0.08), 0 8px 30px rgba(0,0,0,0.06);
-                    max-width: 520px;
-                    width: 100%;
-                    overflow: hidden;
-                    border: 1px solid rgba(255,255,255,0.8);
-                    backdrop-filter: blur(10px);
-                    position: relative;
-                }}
-                
-                .consent-card::before {{
-                    content: '';
-                    position: absolute;
-                    top: 0;
-                    left: 0;
-                    right: 0;
-                    height: 1px;
-                    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
-                    pointer-events: none;
-                }}
-                
-                .header {{
-                    background: white;
-                    padding: 40px 32px 40px;
-                    text-align: center;
-                    border-bottom: 1px solid #f0f0f0;
-                }}
-                
-                .logo-container {{
-                    width: 60px;
-                    height: 60px;
-                    border-radius: 50%;
-                    margin: 0 auto 20px;
-                    position: relative;
-                    background: white;
-                    padding: 8px;
-                    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-                    border: 2px solid #e5eaf5;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                }}
-                
-                .logo-container .fallback-logo {{
-                    width: 100%;
-                    height: 100%;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    background: linear-gradient(135deg, #0066cc 0%, #004499 100%);
-                    color: white;
-                    font-weight: 700;
-                    font-size: 20px;
-                    border-radius: 50%;
-                }}
-                
-                .header h1 {{
-                    color: #1a1a1a;
-                    font-size: 20px;
-                    font-weight: 600;
-                    margin-bottom: 8px;
-                    text-align: center;
-                }}
-                
-                .header .tenant-info {{
-                    color: #666;
-                    font-size: 12px;
-                    font-weight: 500;
-                    margin-top: 12px;
-                    text-align: center;
-                }}
-                
-                .content {{
-                    padding: 40px 32px 40px;
-                }}
-                
-                .client-info {{
-                    background: #f8f9fa;
-                    border-radius: 8px;
-                    padding: 16px;
-                    margin-bottom: 24px;
-                }}
-                
-                .client-row {{
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                    margin-bottom: 8px;
-                }}
-                
-                .client-row:last-child {{
-                    margin-bottom: 0;
-                }}
-                
-                .client-label {{
-                    color: #666;
-                    font-size: 13px;
-                    font-weight: 500;
-                }}
-                
-                .client-value {{
-                    color: #1a1a1a;
-                    font-size: 13px;
-                    font-weight: 600;
-                    text-align: right;
-                    max-width: 60%;
-                    word-break: break-word;
-                }}
-                
-                .permissions-summary {{
-                    margin-bottom: 24px;
-                }}
-                
-                .permissions-summary h3 {{
-                    color: #1a1a1a;
-                    font-size: 16px;
-                    font-weight: 600;
-                    margin-bottom: 12px;
-                }}
-                
-                .permission-item {{
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                    padding: 8px 0;
-                    border-bottom: 1px solid #f0f0f0;
-                }}
-                
-                .permission-item:last-child {{
-                    border-bottom: none;
-                }}
-                
-                .permission-icon {{
-                    color: #0066cc;
-                    font-size: 14px;
-                    width: 16px;
-                }}
-                
-                .permission-text {{
-                    color: #333;
-                    font-size: 14px;
-                }}
-                
-                .notice {{
-                    background: #f8fafc;
-                    border: 1px solid #cbd5e1;
-                    border-radius: 6px;
-                    padding: 16px;
-                    margin-bottom: 24px;
-                    font-size: 14px;
-                    line-height: 1.5;
-                    color: #334155;
-                    text-align: left;
-                }}
-                
-                .notice p {{
-                    margin-bottom: 12px;
-                }}
-                
-                .notice p:last-child {{
-                    margin-bottom: 0;
-                }}
-                
-                .notice strong {{
-                    color: #1e293b;
-                    font-weight: 600;
-                }}
-                
-                .actions {{
-                    display: flex;
-                    gap: 12px;
-                    margin-top: 8px;
-                }}
-                
-                .action-form {{
-                    flex: 1;
-                    margin: 0;
-                }}
-                
-                .btn {{
-                    flex: 1;
-                    padding: 16px 28px;
-                    border: none;
-                    border-radius: 12px;
-                    font-size: 15px;
-                    font-weight: 600;
-                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-                    cursor: pointer;
-                    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                    letter-spacing: -0.01em;
-                    position: relative;
-                    outline: none;
-                    text-decoration: none;
-                    user-select: none;
-                    min-height: 48px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                }}
-                
-                .btn:focus {{
-                    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-                }}
-                
-                .btn:hover {{
-                    transform: translateY(-1px);
-                }}
-                
-                .btn:active {{
-                    transform: translateY(0);
-                    transition: transform 0.1s;
-                }}
-                
-                .btn-primary {{
-                    background: linear-gradient(135deg, #8b9dc3 0%, #6b7a99 100%);
-                    color: white;
-                    border: 1px solid #6b7a99;
-                }}
-                
-                .btn-primary:hover {{
-                    background: linear-gradient(135deg, #6b7a99 0%, #5a6580 100%);
-                    border-color: #5a6580;
-                }}
-                
-                .btn-primary:active {{
-                    background: linear-gradient(135deg, #5a6580 0%, #4a5366 100%);
-                }}
-                
-                .btn-secondary {{
-                    background: #f8f9fa;
-                    color: #495057;
-                    border: 2px solid #dee2e6;
-                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                }}
-                
-                .btn-secondary:hover {{
-                    background: #e9ecef;
-                    border-color: #adb5bd;
-                    color: #343a40;
-                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-                }}
-                
-                .btn-secondary:active {{
-                    background: #dee2e6;
-                    border-color: #6c757d;
-                }}
-                
-                @media (max-width: 480px) {{
-                    .consent-card {{
-                        margin: 0 10px;
-                    }}
-                    
-                    .header, .content {{
-                        padding: 24px 20px;
-                    }}
-                }}
-            </style>
-        </head>
-        <body>
-            <div class="consent-card">
-                <div class="header">
-                    <div class="logo-container">
-                        <div class="fallback-logo">F</div>
-                    </div>
-                    <h1>AI Agent Authorization</h1>
-                    <div class="tenant-info">Connecting to Okta Tenant: {okta_domain}</div>
-                </div>
-                
-                <div class="content">
-                    <div class="client-info">
-                        <div class="client-row">
-                            <span class="client-label">Application:</span>
-                            <span class="client-value">{client_display_info['name']}</span>
-                        </div>
-                        <div class="client-row">
-                            <span class="client-label">Domain:</span>
-                            <span class="client-value">{client_domain}</span>
-                        </div>
-                        <div class="client-row">
-                            <span class="client-label">Platform:</span>
-                            <span class="client-value">{client_display_info['platform']}</span>
-                        </div>
-                        {f'''
-                        <div class="client-row">
-                            <span class="client-label">Client Type:</span>
-                            <span class="client-value">{client_type_display}</span>
-                        </div>
-                        ''' if client_type_display else ''}
-                    </div>
-                    
-                    <div class="permissions-summary">
-                        <h3>Requested Access</h3>
-                        <div class="permission-item">
-                            <span class="permission-icon">🏢</span>
-                            <span class="permission-text">Interact with your Okta tenant</span>
-                        </div>
-                        <div class="permission-item">
-                            <span class="permission-icon">👤</span>
-                            <span class="permission-text">Access your profile information</span>
-                        </div>
-                        <div class="permission-item">
-                            <span class="permission-icon">🛠️</span>
-                            <span class="permission-text">Use MCP tools filtered for your access level</span>
-                        </div>
-                    </div>
-                    
-                    <div class="notice">
-                        <p><strong>You have an AI client requesting access to the MCP Server for Okta by Fctr Identity.</strong></p>
-                        <p><strong>Important:</strong> If you are not actively trying to connect an AI client or authorize access, please reject this request.</p>
-                    </div>
-                    
-                    <div class="actions">
-                        <form method="post" action="/oauth/consent" class="action-form">
-                            <input type="hidden" name="client_id" value="{client_id}">
-                            <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
-                            <input type="hidden" name="state" value="{state or ''}">
-                            <input type="hidden" name="scope" value="{' '.join(server_scopes)}">
-                            <input type="hidden" name="action" value="allow">
-                            <button type="submit" class="btn btn-primary">Authorize</button>
-                        </form>
-                        
-                        <form method="post" action="/oauth/consent" class="action-form">
-                            <input type="hidden" name="client_id" value="{client_id}">
-                            <input type="hidden" name="redirect_uri" value="{redirect_uri or ''}">
-                            <input type="hidden" name="state" value="{state or ''}">
-                            <input type="hidden" name="action" value="deny">
-                            <button type="submit" class="btn btn-secondary">Cancel</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-    
-    def _get_client_display_info(self, redirect_uri: str, user_agent: str) -> dict:
-        """Extract client display information from request context"""
-        client_info = {
-            'name': 'MCP Client Application',
-            'platform': 'Unknown Platform'
+        expires_in = 3600  # 1 hour
+        token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        
+        # Store virtual token mapping (NO real Okta tokens stored here)
+        user_id = auth_code_obj["user_id"]
+        virtual_token_data = {
+            "access_token": virtual_access_token,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "expires_at": token_expires_at,
+            "scopes": auth_code_obj["scopes"],
+            "client_id": client_id,
+            "user_id": user_id,
+            "grant_type": "authorization_code"
         }
         
-        # Try to determine platform from redirect URI
-        if redirect_uri:
-            if 'localhost' in redirect_uri or '127.0.0.1' in redirect_uri:
-                client_info['platform'] = 'Local Development'
-            else:
-                client_info['platform'] = 'Web Application'
+        # Store virtual refresh token mapping if offline_access was requested
+        if virtual_refresh_token:
+            virtual_token_data["virtual_refresh_token"] = virtual_refresh_token
+            # Store refresh token mapping separately for lookup during refresh grant
+            self.session_manager.refresh_token_mappings[virtual_refresh_token] = {
+                "user_id": user_id,
+                "client_id": client_id,
+                "scopes": auth_code_obj["scopes"],
+                "created_at": datetime.now(timezone.utc)
+            }
         
-        return client_info
-    
-    def _identify_client_type(self, user_agent: str) -> str:
-        """Identify client type from user agent for logging"""
-        if not user_agent:
-            return "Unknown Client"
+        self.session_manager.tokens[virtual_access_token] = virtual_token_data
         
-        # Simple generic detection for logging purposes only
-        if 'curl' in user_agent.lower():
-            return "Command Line Tool"
-        elif any(browser in user_agent.lower() for browser in ['chrome', 'firefox', 'safari', 'edge']):
-            return "Web Browser"
-        elif 'python' in user_agent.lower():
-            return "Python Client"
+        # Clean up used authorization code
+        del self.session_manager.authorization_codes[code]
+        
+        # Prepare response with virtual tokens - only include refresh token if offline_access scope was requested
+        response_data = {
+            "access_token": virtual_access_token,
+            "token_type": "Bearer",
+            "expires_in": expires_in,
+            "scope": " ".join(auth_code_obj["scopes"])
+        }
+        
+        # Only include refresh token if client originally requested offline_access scope (RFC 6749 Section 6 compliance)
+        if virtual_refresh_token:
+            response_data["refresh_token"] = virtual_refresh_token
+            logger.info("Refresh token included in response (offline_access scope requested)")
         else:
-            return "Application Client"
-    
-    def _get_redirect_domain(self, redirect_uri: str) -> str:
-        """Extract domain from redirect URI for display"""
-        if not redirect_uri:
-            return "Unknown"
-        try:
-            parsed = urlparse(redirect_uri)
-            if parsed.hostname:
-                if 'localhost' in parsed.hostname or '127.0.0.1' in parsed.hostname:
-                    return f"localhost:{parsed.port or 80}"
-                else:
-                    return parsed.hostname
-            return "Unknown"
-        except Exception:
-            return "Unknown"
+            logger.info("Refresh token omitted from response (offline_access scope not requested)")
         
-        # Continue with additional OAuth routes...
-        logger.info("OAuth routes registered successfully")
+        logger.info(f"Virtual access token issued for client {client_id}, user {user_id}")
+        audit_log("access_token_issued", 
+                 user_id=user_id,
+                 details={
+                     "client_id": client_id,
+                     "scopes": auth_code_obj["scopes"],
+                     "has_refresh_token": bool(virtual_refresh_token),
+                     "grant_type": "authorization_code"
+                 })
+        
+        response = JSONResponse(response_data)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return self.session_manager.add_security_headers(response)
     
+    async def _handle_refresh_token_grant(self, request: Request, form_data) -> JSONResponse:
+        """Handle refresh_token grant type - exchanges virtual refresh token for new virtual access token"""
+        refresh_token = form_data.get("refresh_token")
+        client_id = form_data.get("client_id")
+        
+        if not refresh_token or not client_id:
+            response = JSONResponse({"error": "invalid_request", "error_description": "refresh_token and client_id required"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+        
+        # Validate virtual refresh token
+        if refresh_token not in self.session_manager.refresh_token_mappings:
+            response = JSONResponse({"error": "invalid_grant", "error_description": "Invalid refresh token"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+        
+        refresh_data = self.session_manager.refresh_token_mappings[refresh_token]
+        
+        # Verify client matches
+        if refresh_data["client_id"] != client_id:
+            response = JSONResponse({"error": "invalid_client"}, status_code=400)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+        
+        user_id = refresh_data["user_id"]
+        original_scopes = refresh_data["scopes"]
+        
+        try:
+            # SECURITY: Use real Okta refresh token to get fresh tokens and user info
+            if user_id not in self.session_manager.real_token_store:
+                response = JSONResponse({"error": "invalid_grant", "error_description": "User session expired - no stored tokens"}, status_code=400)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return self.session_manager.add_security_headers(response)
+            
+            real_tokens = self.session_manager.real_token_store[user_id]
+            real_refresh_token = real_tokens.get('refresh_token')
+            
+            if not real_refresh_token:
+                response = JSONResponse({"error": "invalid_grant", "error_description": "No refresh token available"}, status_code=400)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return self.session_manager.add_security_headers(response)
+            
+            async with httpx.AsyncClient() as client:
+                # SECURITY: Use real Okta refresh token to get fresh access token
+                refresh_data = {
+                    'grant_type': 'refresh_token',
+                    'client_id': self.oauth_config.client_id,
+                    'client_secret': self.oauth_config.client_secret,
+                    'refresh_token': real_refresh_token,
+                    'scope': ' '.join(original_scopes)
+                }
+                
+                # Exchange refresh token with Okta
+                token_response = await client.post(
+                    self.oauth_config.token_url,
+                    data=refresh_data,
+                    headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                )
+                
+                if token_response.status_code != 200:
+                    logger.error(f"Okta refresh token exchange failed: {token_response.text}")
+                    response = JSONResponse({"error": "invalid_grant", "error_description": "Refresh token expired or invalid"}, status_code=400)
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                    return self.session_manager.add_security_headers(response)
+                
+                new_tokens = token_response.json()
+                new_access_token = new_tokens.get('access_token')
+                new_id_token = new_tokens.get('id_token')
+                new_refresh_token = new_tokens.get('refresh_token', real_refresh_token)  # Use new or keep existing
+                
+                # SECURITY: Validate new ID token to get updated user info and groups
+                if new_id_token:
+                    id_token_result = await self.session_manager.jwt_validator.validate_id_token(new_id_token)
+                    if not id_token_result.is_valid:
+                        logger.error(f"Refresh: ID token validation failed: {id_token_result.error}")
+                        response = JSONResponse({"error": "server_error", "error_description": "Token validation failed"}, status_code=500)
+                        response.headers["Access-Control-Allow-Origin"] = "*"
+                        return self.session_manager.add_security_headers(response)
+                    
+                    # Extract fresh user info from validated ID token
+                    fresh_user_info = self.session_manager.jwt_validator.get_user_info_from_claims(id_token_result.user_claims)
+                    logger.info(f"Refresh: ID token validation successful, updated user info for: {fresh_user_info.get('email')}")
+                else:
+                    # Fallback to userinfo endpoint if no ID token
+                    userinfo_url = f"{self.oauth_config.org_url}/oauth2/v1/userinfo"
+                    userinfo_response = await client.get(
+                        userinfo_url,
+                        headers={'Authorization': f'Bearer {new_access_token}'}
+                    )
+                    
+                    if userinfo_response.status_code != 200:
+                        logger.error(f"Refresh: Userinfo request failed: {userinfo_response.text}")
+                        response = JSONResponse({"error": "server_error", "error_description": "Failed to get user info"}, status_code=500)
+                        response.headers["Access-Control-Allow-Origin"] = "*"
+                        return self.session_manager.add_security_headers(response)
+                    
+                    fresh_user_info = userinfo_response.json()
+                
+                # SECURITY: Update stored real tokens
+                self.session_manager.real_token_store[user_id] = {
+                    'access_token': new_access_token,
+                    'refresh_token': new_refresh_token,
+                    'id_token': new_id_token,
+                    'expires_at': datetime.now(timezone.utc) + timedelta(seconds=new_tokens.get('expires_in', 3600)),
+                    'updated_at': datetime.now(timezone.utc)
+                }
+                
+                # SECURITY: Re-evaluate user role based on fresh groups from Okta
+                current_groups = fresh_user_info.get('groups', [])
+                current_role = self.session_manager.role_mapper.get_user_role(current_groups)
+                
+                # Generate new virtual tokens for the client
+                new_virtual_access_token = secrets.token_urlsafe(32)
+                new_virtual_refresh_token = secrets.token_urlsafe(32)  # Always issue new virtual refresh token
+                
+                expires_in = 3600  # 1 hour
+                token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                
+                # Store new virtual token mapping with updated role and fresh user info
+                new_virtual_token_data = {
+                    "access_token": new_virtual_access_token,
+                    "token_type": "Bearer",
+                    "expires_in": expires_in,
+                    "expires_at": token_expires_at,
+                    "scopes": original_scopes,
+                    "client_id": client_id,
+                    "user_id": user_id,
+                    "grant_type": "refresh_token",
+                    "virtual_refresh_token": new_virtual_refresh_token,
+                    "rbac_role": current_role,  # Updated role
+                    "groups": current_groups,   # Updated groups
+                    "email": fresh_user_info.get('email'),
+                    "name": fresh_user_info.get('name')
+                }
+                
+                self.session_manager.tokens[new_virtual_access_token] = new_virtual_token_data
+                
+                # Update refresh token mapping (invalidate old, create new)
+                del self.session_manager.refresh_token_mappings[refresh_token]  # Invalidate old refresh token
+                self.session_manager.refresh_token_mappings[new_virtual_refresh_token] = {
+                    "user_id": user_id,
+                    "client_id": client_id,
+                    "scopes": original_scopes,
+                    "created_at": datetime.now(timezone.utc)
+                }
+                
+                # Prepare response - only include refresh token if client originally requested offline_access scope  
+                response_data = {
+                    "access_token": new_virtual_access_token,
+                    "token_type": "Bearer",
+                    "expires_in": expires_in,
+                    "scope": " ".join(original_scopes)
+                }
+                
+                # Only include refresh token if client originally requested offline_access scope (RFC 6749 Section 6 compliance)
+                if "offline_access" in original_scopes:
+                    response_data["refresh_token"] = new_virtual_refresh_token
+                    logger.info("Refresh token included in response (offline_access scope requested)")
+                else:
+                    logger.info("Refresh token omitted from response (offline_access scope not requested)")
+                
+                logger.info(f"Virtual tokens refreshed for client {client_id}, user {user_id}, role updated to: {current_role}")
+                audit_log("access_token_refreshed", 
+                         user_id=user_id,
+                         details={
+                             "client_id": client_id,
+                             "scopes": original_scopes,
+                             "updated_role": current_role,
+                             "updated_groups": current_groups,
+                             "grant_type": "refresh_token"
+                         })
+                
+                response = JSONResponse(response_data)
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                return self.session_manager.add_security_headers(response)
+                
+        except Exception as e:
+            logger.error(f"Refresh token error: {e}")
+            response = JSONResponse({"error": "server_error"}, status_code=500)
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            return self.session_manager.add_security_headers(response)
+
     def _register_fastmcp_middleware(self):
         """Register FastMCP middleware for authentication and RBAC using proper middleware system"""
         

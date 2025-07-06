@@ -299,3 +299,194 @@ class JWTValidator:
             'audience': claims.get('aud'),
             'issuer': claims.get('iss')
         }
+    
+    async def validate_id_token(self, id_token: str) -> JWTValidationResult:
+        """
+        Validate ID token with specific ID token requirements.
+        
+        ID tokens have different audience requirements than access tokens:
+        - Audience should be the OAuth client ID
+        - Used for user identity, not API access
+        """
+        try:
+            # Get unverified header
+            unverified_header = jwt.get_unverified_header(id_token)
+            kid = unverified_header.get('kid')
+            
+            if not kid:
+                logger.error("ID token missing 'kid' claim in header")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error="ID token missing key ID", 
+                    error_type="invalid_token"
+                )
+            
+            # Get signing key
+            signing_key = await self._get_signing_key(kid)
+            if not signing_key:
+                logger.error(f"Unable to find signing key for ID token kid: {kid}")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error="Unable to find signing key for ID token", 
+                    error_type="invalid_token"
+                )
+            
+            # ID token validation with client ID as audience
+            try:
+                decoded = jwt.decode(
+                    id_token,
+                    signing_key,
+                    algorithms=['RS256'],
+                    audience=self.config.client_id,  # ID tokens use client_id as audience
+                    issuer=self.config.org_url,
+                    options={
+                        "verify_signature": True,
+                        "verify_exp": True,
+                        "verify_aud": True,
+                        "verify_iss": True,
+                        "require_exp": True,
+                        "require_aud": True,
+                        "require_iss": True
+                    }
+                )
+                
+                logger.debug(f"ID token validation successful for user: {decoded.get('sub', 'unknown')}")
+                return JWTValidationResult(is_valid=True, user_claims=decoded)
+                
+            except jwt.InvalidSignatureError as e:
+                logger.error("ID token signature validation failed")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error="ID token signature validation failed", 
+                    error_type="invalid_signature"
+                )
+            except jwt.InvalidIssuerError as e:
+                logger.error(f"ID token issuer validation failed: {e}")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error=f"ID token issuer validation failed: {e}", 
+                    error_type="invalid_issuer"
+                )
+            except jwt.InvalidAudienceError as e:
+                logger.error(f"ID token audience validation failed: {e}")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error=f"ID token audience validation failed: {e}", 
+                    error_type="invalid_audience"
+                )
+            except jwt.ExpiredSignatureError as e:
+                logger.error("ID token has expired")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error="ID token has expired", 
+                    error_type="expired_token"
+                )
+            except Exception as e:
+                logger.error(f"ID token validation error: {e}")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error=f"ID token validation failed: {str(e)}", 
+                    error_type="invalid_token"
+                )
+                
+        except Exception as e:
+            logger.error(f"ID token validation error: {e}")
+            return JWTValidationResult(
+                is_valid=False, 
+                error=f"ID token validation failed: {str(e)}", 
+                error_type="invalid_token"
+            )
+    
+    async def validate_refresh_token(self, refresh_token: str) -> JWTValidationResult:
+        """
+        Validate refresh token.
+        
+        Note: Okta refresh tokens may be opaque tokens, not JWTs.
+        This method handles both JWT and opaque refresh tokens.
+        """
+        try:
+            # Check if it's a JWT (has dots)
+            if refresh_token.count('.') == 2:
+                # It's a JWT refresh token
+                try:
+                    unverified_header = jwt.get_unverified_header(refresh_token)
+                    kid = unverified_header.get('kid')
+                    
+                    if not kid:
+                        logger.warning("Refresh token JWT missing 'kid' claim - may be opaque token")
+                        return JWTValidationResult(
+                            is_valid=True,  # Assume opaque token, validate via Okta
+                            user_claims={"token_type": "opaque_refresh_token"}
+                        )
+                    
+                    # Get signing key
+                    signing_key = await self._get_signing_key(kid)
+                    if not signing_key:
+                        logger.error(f"Unable to find signing key for refresh token kid: {kid}")
+                        return JWTValidationResult(
+                            is_valid=False, 
+                            error="Unable to find signing key for refresh token", 
+                            error_type="invalid_token"
+                        )
+                    
+                    # Validate JWT refresh token
+                    decoded = jwt.decode(
+                        refresh_token,
+                        signing_key,
+                        algorithms=['RS256'],
+                        audience=self.config.client_id,
+                        issuer=self.config.org_url,
+                        options={
+                            "verify_signature": True,
+                            "verify_exp": True,
+                            "verify_aud": True,
+                            "verify_iss": True,
+                            "require_exp": True,
+                            "require_aud": True,
+                            "require_iss": True
+                        }
+                    )
+                    
+                    logger.debug(f"Refresh token JWT validation successful for user: {decoded.get('sub', 'unknown')}")
+                    return JWTValidationResult(is_valid=True, user_claims=decoded)
+                    
+                except jwt.InvalidSignatureError:
+                    logger.error("Refresh token signature validation failed")
+                    return JWTValidationResult(
+                        is_valid=False, 
+                        error="Refresh token signature validation failed", 
+                        error_type="invalid_signature"
+                    )
+                except jwt.ExpiredSignatureError:
+                    logger.error("Refresh token has expired")
+                    return JWTValidationResult(
+                        is_valid=False, 
+                        error="Refresh token has expired", 
+                        error_type="expired_token"
+                    )
+                except Exception as e:
+                    logger.warning(f"Refresh token JWT validation failed, treating as opaque: {e}")
+                    # Fall through to opaque token handling
+            
+            # Handle as opaque refresh token (most common case for Okta)
+            if len(refresh_token) >= 20:  # Minimum length check for security
+                logger.debug("Treating refresh token as opaque token (normal for Okta)")
+                return JWTValidationResult(
+                    is_valid=True, 
+                    user_claims={"token_type": "opaque_refresh_token"}
+                )
+            else:
+                logger.error("Refresh token too short to be valid")
+                return JWTValidationResult(
+                    is_valid=False, 
+                    error="Refresh token format invalid", 
+                    error_type="invalid_token"
+                )
+                
+        except Exception as e:
+            logger.error(f"Refresh token validation error: {e}")
+            return JWTValidationResult(
+                is_valid=False, 
+                error=f"Refresh token validation failed: {str(e)}", 
+                error_type="invalid_token"
+            )
