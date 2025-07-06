@@ -947,8 +947,9 @@ class FastMCPOAuthServer:
                             refresh_token = None
                 
                 # Store user info in session (NO real Okta tokens stored in session)
+                # IMPORTANT: JWT validator already maps 'sub' to 'user_id' for consistency
                 session_user_info = {
-                    'user_id': user_info.get('sub'),
+                    'user_id': user_info.get('user_id'),  # JWT validator maps 'sub' -> 'user_id'
                     'email': user_info.get('email'),
                     'name': user_info.get('name'),
                     'groups': user_info.get('groups', []),
@@ -963,7 +964,7 @@ class FastMCPOAuthServer:
                 
                 # SECURITY: Store real Okta tokens securely (separate from user session)
                 # This allows us to refresh tokens and validate user state with Okta
-                user_id = user_info.get('sub')
+                user_id = user_info.get('user_id')  # JWT validator already mapped 'sub' -> 'user_id'
                 self.session_manager.real_token_store[user_id] = {
                     'access_token': access_token,
                     'refresh_token': refresh_token,  # Store real refresh token securely
@@ -990,24 +991,29 @@ class FastMCPOAuthServer:
                 # Finalize consent if it was pending
                 if pending_consent:
                     user_consent = UserConsent(
-                        user_id=user_info.get('sub'),
+                        user_id=user_info.get('user_id'),  # JWT validator mapped 'sub' -> 'user_id'
                         virtual_client_id=virtual_client_id,
                         scopes=original_scope.split() if original_scope else [],
                         granted_at=datetime.now(timezone.utc),
                         expires_at=datetime.now(timezone.utc) + timedelta(hours=24)
                     )
                     
-                    consent_key = f"{user_info.get('sub')}_{virtual_client_id}"
+                    consent_key = f"{user_info.get('user_id')}_{virtual_client_id}"
                     self.session_manager.user_consents[consent_key] = user_consent
                 
                 # Generate virtual authorization code for the original client
                 auth_code = secrets.token_urlsafe(32)
                 code_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
                 
+                # DEBUG: Log user_info to see what we have
+                user_id_from_okta = user_info.get('user_id')  # JWT validator already mapped 'sub' -> 'user_id'
+                logger.info(f"🔍 DEBUG: Creating auth code - user_info keys: {list(user_info.keys())}")
+                logger.info(f"🔍 DEBUG: Creating auth code - user_id from user_info: {user_id_from_okta}")
+                
                 auth_code_obj = AuthorizationCode(
                     code=auth_code,
                     client_id=virtual_client_id,
-                    user_id=user_info.get('sub'),
+                    user_id=user_id_from_okta,
                     scopes=original_scope.split() if original_scope else ["openid", "profile", "email"],
                     code_challenge=code_challenge,
                     code_challenge_method="S256",
@@ -1016,7 +1022,22 @@ class FastMCPOAuthServer:
                     expires_at=code_expires_at
                 )
                 
-                self.session_manager.authorization_codes[auth_code] = auth_code_obj.__dict__
+                # DEBUG: Log what gets stored - convert to dict explicitly
+                auth_code_dict = {
+                    'code': auth_code_obj.code,
+                    'client_id': auth_code_obj.client_id,
+                    'user_id': auth_code_obj.user_id,
+                    'scopes': auth_code_obj.scopes,
+                    'code_challenge': auth_code_obj.code_challenge,
+                    'code_challenge_method': auth_code_obj.code_challenge_method,
+                    'redirect_uri': auth_code_obj.redirect_uri,
+                    'created_at': auth_code_obj.created_at,
+                    'expires_at': auth_code_obj.expires_at,
+                    'used': getattr(auth_code_obj, 'used', False)
+                }
+                
+                logger.info(f"🔍 DEBUG: Storing auth code with user_id: {auth_code_dict['user_id']}")
+                self.session_manager.authorization_codes[auth_code] = auth_code_dict
                 
                 # Redirect back to the original client
                 params = {"code": auth_code}
@@ -1027,7 +1048,7 @@ class FastMCPOAuthServer:
                 
                 logger.info(f"OAuth callback completed, redirecting to: {original_redirect_uri}")
                 audit_log("oauth_callback_completed", 
-                         user_id=user_info.get('sub'),
+                         user_id=user_info.get('user_id'),  # JWT validator mapped 'sub' -> 'user_id'
                          details={
                              "virtual_client_id": virtual_client_id,
                              "user_email": user_info.get('email'),
@@ -1055,6 +1076,11 @@ class FastMCPOAuthServer:
             return self.session_manager.add_security_headers(response)
             
         auth_code_obj = self.session_manager.authorization_codes[code]
+        
+        # DEBUG: Log what we retrieve from the authorization code
+        logger.info(f"🔍 DEBUG: Retrieved auth code - user_id: {auth_code_obj.get('user_id')}")
+        logger.info(f"🔍 DEBUG: Retrieved auth code - all keys: {list(auth_code_obj.keys())}")
+        logger.info(f"🔍 DEBUG: Retrieved auth code - full object: {auth_code_obj}")
         
         # Verify client and expiration
         if auth_code_obj["client_id"] != client_id:
@@ -1087,6 +1113,12 @@ class FastMCPOAuthServer:
         
         # Store virtual token mapping (NO real Okta tokens stored here)
         user_id = auth_code_obj["user_id"]
+        
+        # DEBUG: Log user_id extraction for audit logging
+        logger.info(f"🔍 DEBUG: Token issuance - extracted user_id: {user_id}")
+        logger.info(f"🔍 DEBUG: Token issuance - auth_code_obj user_id: {auth_code_obj.get('user_id')}")
+        logger.info(f"🔍 DEBUG: About to call audit_log with user_id: {user_id}")
+        
         virtual_token_data = {
             "access_token": virtual_access_token,
             "token_type": "Bearer",
@@ -1325,6 +1357,108 @@ class FastMCPOAuthServer:
             response.headers["Access-Control-Allow-Origin"] = "*"
             return self.session_manager.add_security_headers(response)
 
+    def _get_consent_template(self, client_id: str, client_name: str, redirect_uri: str, state: str, scope: str, code_challenge: str, user_agent: str) -> str:
+        """Generate enhanced consent page HTML"""
+        scopes = scope.split() if scope else []
+        scope_descriptions = {
+            'openid': 'Verify your identity',
+            'profile': 'Access your basic profile information', 
+            'email': 'Access your email address',
+            'offline_access': 'Maintain access when you\'re offline',
+            'groups': 'Access your group memberships',
+            'okta.users.read': 'Read user information',
+            'okta.groups.read': 'Read group information',
+            'okta.apps.read': 'Read application information',
+            'okta.events.read': 'Read audit events',
+            'okta.logs.read': 'Read system logs',
+            'okta.policies.read': 'Read security policies'
+        }
+        
+        client_type = self._identify_client_type(user_agent)
+        
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Application Access Request</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+               min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
+        .consent-container {{ background: white; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); 
+                            max-width: 500px; width: 100%; overflow: hidden; }}
+        .header {{ background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 30px; text-align: center; }}
+        .header h1 {{ font-size: 24px; font-weight: 600; margin-bottom: 8px; }}
+        .content {{ padding: 30px; }}
+        .app-info {{ background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 25px; border-left: 4px solid #4f46e5; }}
+        .permissions {{ margin-bottom: 25px; }}
+        .permission-item {{ display: flex; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }}
+        .btn {{ padding: 14px 28px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; 
+               transition: all 0.2s ease; text-decoration: none; text-align: center; display: inline-block; margin: 5px; }}
+        .btn-allow {{ background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; }}
+        .btn-deny {{ background: #f8fafc; color: #64748b; border: 2px solid #e2e8f0; }}
+        .actions {{ display: flex; gap: 12px; justify-content: center; }}
+        .security-notice {{ background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 25px; }}
+        .security-notice p {{ color: #92400e; font-size: 13px; margin: 0; }}
+    </style>
+</head>
+<body>
+    <div class="consent-container">
+        <div class="header">
+            <h1>🔐 Application Access Request</h1>
+            <p>Secure OAuth 2.0 Authorization</p>
+        </div>
+        <div class="content">
+            <div class="app-info">
+                <h2>{client_name}</h2>
+                <p><strong>Client Type:</strong> {client_type}</p>
+                <p><strong>Redirect URI:</strong> {redirect_uri}</p>
+                <p><strong>Client ID:</strong> {client_id}</p>
+            </div>
+            <div class="permissions">
+                <h3>🔐 Requested Permissions</h3>
+                {''.join([f'<div class="permission-item">✓ {scope_descriptions.get(s, f"Access {s} resources")}</div>' for s in scopes])}
+            </div>
+            <div class="security-notice">
+                <p><strong>Security Notice:</strong> By granting access, you authorize this application to access your Okta resources 
+                according to the permissions listed above. You can revoke this access at any time.</p>
+            </div>
+            <form method="post" class="actions">
+                <input type="hidden" name="client_id" value="{client_id}">
+                <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                <input type="hidden" name="state" value="{state}">
+                <input type="hidden" name="scope" value="{scope}">
+                <input type="hidden" name="code_challenge" value="{code_challenge}">
+                <button type="submit" name="action" value="allow" class="btn btn-allow">✅ Allow Access</button>
+                <button type="submit" name="action" value="deny" class="btn btn-deny">❌ Deny Access</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    def _identify_client_type(self, user_agent: str) -> str:
+        """Identify client type from User-Agent header"""
+        user_agent_lower = user_agent.lower()
+        
+        if 'claude' in user_agent_lower or 'anthropic' in user_agent_lower:
+            return "Claude Desktop (AI Assistant)"
+        elif 'cursor' in user_agent_lower:
+            return "Cursor IDE"
+        elif 'vscode' in user_agent_lower or 'code' in user_agent_lower:
+            return "VS Code Extension"
+        elif 'postman' in user_agent_lower:
+            return "Postman API Client"
+        elif 'curl' in user_agent_lower:
+            return "cURL Command Line"
+        elif 'python' in user_agent_lower:
+            return "Python Application"
+        elif 'chrome' in user_agent_lower or 'firefox' in user_agent_lower or 'safari' in user_agent_lower:
+            return "Web Browser"
+        else:
+            return "Desktop Application"
+
     def _register_fastmcp_middleware(self):
         """Register FastMCP middleware for authentication and RBAC using proper middleware system"""
         
@@ -1443,8 +1577,15 @@ class FastMCPOAuthServer:
                     raise
                 except Exception as e:
                     logger.error(f"Error executing tool '{tool_name}': {e}")
+                    # Get user info safely for audit logging
+                    try:
+                        current_user = self.session_manager.get_current_user()
+                        user_id = current_user.get('user_id') if current_user else None
+                    except:
+                        user_id = None
+                    
                     audit_log("call_tool_error", 
-                             user_id=user_info.get('user_id') if 'user_info' in locals() else None,
+                             user_id=user_id,
                              details={
                                  "tool_name": tool_name,
                                  "error": str(e)
@@ -1510,8 +1651,15 @@ class FastMCPOAuthServer:
                     raise
                 except Exception as e:
                     logger.error(f"Error reading resource '{uri}': {e}")
+                    # Get user info safely for audit logging
+                    try:
+                        current_user = self.session_manager.get_current_user()
+                        user_id = current_user.get('user_id') if current_user else None
+                    except:
+                        user_id = None
+                    
                     audit_log("read_resource_error", 
-                             user_id=user_info.get('user_id') if 'user_info' in locals() else None,
+                             user_id=user_id,
                              details={
                                  "uri": uri,
                                  "error": str(e)
