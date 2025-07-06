@@ -505,8 +505,28 @@ class FastMCPOAuthServer:
                     code_challenge = form_data.get("code_challenge")
                     scope = form_data.get("scope", "openid profile email")
                 
-                if not client_id or client_id not in self.session_manager.virtual_clients:
-                    return JSONResponse({"error": "invalid_client"}, status_code=400)
+                if not client_id or not redirect_uri:
+                    return JSONResponse({"error": "invalid_request", "error_description": "client_id and redirect_uri required"}, status_code=400)
+                
+                # Auto-register virtual client if it doesn't exist (for MCP Inspector compatibility)
+                if client_id not in self.session_manager.virtual_clients:
+                    logger.info(f"Auto-registering virtual client - ID: {client_id}")
+                    
+                    # Create virtual client with requested scopes
+                    requested_scopes = scope.split() if scope else ["openid", "profile", "email"]
+                    virtual_client = VirtualClient(
+                        client_id=client_id,
+                        name="Auto-registered MCP Client",
+                        redirect_uri=redirect_uri,  # Use the provided redirect_uri
+                        scopes=requested_scopes,  # Include the scopes parameter
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    
+                    self.session_manager.virtual_clients[client_id] = virtual_client
+                    
+                    logger.info(f"Virtual client {client_id} auto-registered for redirect_uri: {redirect_uri} with scopes: {requested_scopes}")
+                
+                virtual_client = self.session_manager.virtual_clients[client_id]
                 
                 # Check for pending consent (use memory storage for FastMCP compatibility)
                 consent_key = f"consent_{client_id}"
@@ -812,19 +832,48 @@ class FastMCPOAuthServer:
                 if datetime.now(timezone.utc) > token_data["expires_at"]:
                     return JSONResponse({"error": "invalid_token", "error_description": "Token expired"}, status_code=401)
                 
-                # Get user info
+                # Get user info from session (groups not stored in session)
                 user_info = await self.session_manager.get_user_from_session(request)
                 if not user_info:
                     return JSONResponse({"error": "invalid_token"}, status_code=401)
                 
-                # Return userinfo claims
-                userinfo = {
+                # For userinfo endpoint, we need to get fresh groups if 'groups' scope was requested
+                # This is required by OAuth spec when groups scope is present
+                user_id = user_info.get('user_id')
+                userinfo_claims = {
                     "sub": user_info.get('user_id'),
                     "name": user_info.get('name'),
                     "email": user_info.get('email'),
-                    "preferred_username": user_info.get('email'),
-                    "groups": user_info.get('groups', [])
+                    "preferred_username": user_info.get('email')
                 }
+                
+                # Only include groups if the token has 'groups' scope
+                token_data = self.session_manager.tokens.get(access_token, {})
+                token_scopes = token_data.get('scopes', [])
+                
+                if 'groups' in token_scopes:
+                    # Get fresh groups from real token store (don't store in session)
+                    if user_id in self.session_manager.real_token_store:
+                        real_tokens = self.session_manager.real_token_store[user_id]
+                        real_access_token = real_tokens.get('access_token')
+                        
+                        # Fetch fresh userinfo from Okta to get current groups
+                        try:
+                            async with httpx.AsyncClient() as client:
+                                userinfo_url = f"{self.oauth_config.org_url}/oauth2/v1/userinfo"
+                                userinfo_response = await client.get(
+                                    userinfo_url,
+                                    headers={'Authorization': f'Bearer {real_access_token}'}
+                                )
+                                if userinfo_response.status_code == 200:
+                                    okta_userinfo = userinfo_response.json()
+                                    userinfo_claims["groups"] = okta_userinfo.get('groups', [])
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch fresh groups for userinfo: {e}")
+                            userinfo_claims["groups"] = []  # Fallback to empty groups
+                
+                # Return userinfo claims
+                userinfo = userinfo_claims
                 
                 response = JSONResponse(userinfo)
                 response.headers["Access-Control-Allow-Origin"] = "*"
@@ -930,13 +979,13 @@ class FastMCPOAuthServer:
                     'user_id': user_info.get('user_id'),  # JWT validator maps 'sub' -> 'user_id'
                     'email': user_info.get('email'),
                     'name': user_info.get('name'),
-                    'groups': user_info.get('groups', []),
                     'scopes': tokens.get('scope', '').split(),
                     'authenticated': True
                     # NOTE: Real Okta tokens stored separately for security
+                    # NOTE: Groups not stored - only the mapped role is kept
                 }
                 
-                # Map user role
+                # Map user role from groups (but don't store the groups)
                 groups = user_info.get('groups', [])
                 session_user_info['rbac_role'] = self.session_manager.role_mapper.get_user_role(groups)
                 
@@ -1273,10 +1322,10 @@ class FastMCPOAuthServer:
                     "user_id": user_id,
                     "grant_type": "refresh_token",
                     "virtual_refresh_token": new_virtual_refresh_token,
-                    "rbac_role": current_role,  # Updated role
-                    "groups": current_groups,   # Updated groups
+                    "rbac_role": current_role,  # Updated role (groups not stored)
                     "email": fresh_user_info.get('email'),
                     "name": fresh_user_info.get('name')
+                    # NOTE: Groups not stored in token data - only the mapped role
                 }
                 
                 self.session_manager.tokens[new_virtual_access_token] = new_virtual_token_data
@@ -1312,8 +1361,8 @@ class FastMCPOAuthServer:
                              "client_id": client_id,
                              "scopes": original_scopes,
                              "updated_role": current_role,
-                             "updated_groups": current_groups,
                              "grant_type": "refresh_token"
+                             # NOTE: Groups not logged for privacy/performance
                          })
                 
                 response = JSONResponse(response_data)
