@@ -1328,81 +1328,404 @@ class FastMCPOAuthServer:
             return self.session_manager.add_security_headers(response)
 
     def _get_consent_template(self, client_id: str, client_name: str, redirect_uri: str, state: str, scope: str, code_challenge: str, user_agent: str) -> str:
-        """Generate enhanced consent page HTML"""
+        """Generate business-appropriate consent page HTML (ported from old proxy)"""
         scopes = scope.split() if scope else []
+        
+        # Enhanced scope descriptions with better categorization  
         scope_descriptions = {
+            # Identity & Profile Scopes
             'openid': 'Verify your identity',
-            'profile': 'Access your basic profile information', 
+            'profile': 'Access your basic profile information (name, username)',
             'email': 'Access your email address',
-            'offline_access': 'Maintain access when you\'re offline',
+            'address': 'Access your address information',
+            'phone': 'Access your phone number',
             'groups': 'Access your group memberships',
-            'okta.users.read': 'Read user information',
-            'okta.groups.read': 'Read group information',
-            'okta.apps.read': 'Read application information',
-            'okta.events.read': 'Read audit events',
-            'okta.logs.read': 'Read system logs',
-            'okta.policies.read': 'Read security policies'
+            'offline_access': 'Maintain access when you\'re offline',
+
+            # Okta API Scopes (what the server actually uses)
+            'okta.users.read': 'View users in your Okta tenant',
+            'okta.groups.read': 'View groups in your Okta tenant',
+            'okta.apps.read': 'View applications in your Okta tenant',
+            'okta.events.read': 'View system events in your Okta tenant',
+            'okta.logs.read': 'View audit logs in your Okta tenant',
+            'okta.policies.read': 'View security policies in your Okta tenant',
+            'okta.devices.read': 'View registered devices in your Okta tenant',
+            'okta.factors.read': 'View authentication factors in your Okta tenant'
         }
         
         client_type = self._identify_client_type(user_agent)
+        client_domain = self._get_redirect_domain(redirect_uri) if redirect_uri else "Unknown Domain"
+        okta_domain = self.oauth_config.org_url.replace("https://", "") if self.oauth_config.org_url else "your-tenant.okta.com"
+        
+        # Get client type for display (optional, only show if meaningful)
+        client_type_display = ""
+        if user_agent and client_type and not client_type.startswith("Unknown"):
+            client_type_display = client_type
         
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Application Access Request</title>
+    <title>Authorization Request</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-               background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-               min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }}
-        .consent-container {{ background: white; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); 
-                            max-width: 500px; width: 100%; overflow: hidden; }}
-        .header {{ background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%); color: white; padding: 30px; text-align: center; }}
-        .header h1 {{ font-size: 24px; font-weight: 600; margin-bottom: 8px; }}
-        .content {{ padding: 30px; }}
-        .app-info {{ background: #f8fafc; border-radius: 8px; padding: 20px; margin-bottom: 25px; border-left: 4px solid #4f46e5; }}
-        .permissions {{ margin-bottom: 25px; }}
-        .permission-item {{ display: flex; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid #e2e8f0; }}
-        .btn {{ padding: 14px 28px; border: none; border-radius: 8px; font-size: 16px; font-weight: 600; cursor: pointer; 
-               transition: all 0.2s ease; text-decoration: none; text-align: center; display: inline-block; margin: 5px; }}
-        .btn-allow {{ background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; }}
-        .btn-deny {{ background: #f8fafc; color: #64748b; border: 2px solid #e2e8f0; }}
-        .actions {{ display: flex; gap: 12px; justify-content: center; }}
-        .security-notice {{ background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 25px; }}
-        .security-notice p {{ color: #92400e; font-size: 13px; margin: 0; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+
+        body {{
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(180deg, #e5eaf5, #f0f4fb);
+            min-height: 100vh;
+            position: relative;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+            font-optical-sizing: auto;
+            text-rendering: optimizeLegibility;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }}
+
+        .consent-card {{
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.08), 0 8px 30px rgba(0,0,0,0.06);
+            max-width: 520px;
+            width: 100%;
+            overflow: hidden;
+            border: 1px solid rgba(255,255,255,0.8);
+            backdrop-filter: blur(10px);
+            position: relative;
+        }}
+
+        .consent-card::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+            pointer-events: none;
+        }}
+
+        .header {{
+            background: white;
+            padding: 40px 32px 40px;
+            text-align: center;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+
+        .logo-container {{
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            position: relative;
+            background: white;
+            padding: 8px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            border: 2px solid #e5eaf5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+
+        .logo-container img {{
+            width: 80%;
+            height: 80%;
+            object-fit: contain;
+            border-radius: 50%;
+        }}
+
+        .header h1 {{
+            color: #1a1a1a;
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            text-align: center;
+        }}
+
+        .header p {{
+            color: #666;
+            font-size: 14px;
+            text-align: center;
+        }}
+
+        .header .tenant-info {{
+            color: #666;
+            font-size: 12px;
+            font-weight: 500;
+            margin-top: 12px;
+            text-align: center;
+        }}
+
+        .content {{
+            padding: 40px 32px 40px;
+        }}
+
+        .client-info {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }}
+
+        .client-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }}
+
+        .client-row:last-child {{
+            margin-bottom: 0;
+        }}
+
+        .client-label {{
+            color: #666;
+            font-size: 13px;
+            font-weight: 500;
+        }}
+
+        .client-value {{
+            color: #1a1a1a;
+            font-size: 13px;
+            font-weight: 600;
+            text-align: right;
+            max-width: 60%;
+            word-break: break-word;
+        }}
+
+        .permissions-summary {{
+            margin-bottom: 24px;
+        }}
+
+        .permissions-summary h3 {{
+            color: #1a1a1a;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }}
+
+        .permission-item {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }}
+
+        .permission-item:last-child {{
+            border-bottom: none;
+        }}
+
+        .permission-icon {{
+            color: #0066cc;
+            font-size: 14px;
+            width: 16px;
+        }}
+
+        .permission-text {{
+            color: #333;
+            font-size: 14px;
+        }}
+
+        .notice {{
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.5;
+            color: #334155;
+            text-align: left;
+        }}
+
+        .notice p {{
+            margin-bottom: 12px;
+        }}
+
+        .notice p:last-child {{
+            margin-bottom: 0;
+        }}
+
+        .notice strong {{
+            color: #1e293b;
+            font-weight: 600;
+        }}
+
+        .actions {{
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+        }}
+
+        .action-form {{
+            flex: 1;
+            margin: 0;
+        }}
+
+        .btn {{
+            flex: 1;
+            padding: 16px 28px;
+            border: none;
+            border-radius: 12px;
+            font-size: 15px;
+            font-weight: 600;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            letter-spacing: -0.01em;
+            position: relative;
+            outline: none;
+            text-decoration: none;
+            user-select: none;
+            min-height: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+        }}
+
+        .btn:focus {{
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }}
+
+        .btn:hover {{
+            transform: translateY(-1px);
+        }}
+
+        .btn:active {{
+            transform: translateY(0);
+            transition: transform 0.1s;
+        }}
+
+        .btn-primary {{
+            background: linear-gradient(135deg, #8b9dc3 0%, #6b7a99 100%);
+            color: white;
+            border: 1px solid #6b7a99;
+        }}
+
+        .btn-primary:hover {{
+            background: linear-gradient(135deg, #6b7a99 0%, #5a6580 100%);
+            border-color: #5a6580;
+        }}
+
+        .btn-primary:active {{
+            background: linear-gradient(135deg, #5a6580 0%, #4a5366 100%);
+        }}
+
+        .btn-secondary {{
+            background: #f8f9fa;
+            color: #495057;
+            border: 2px solid #dee2e6;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }}
+
+        .btn-secondary:hover {{
+            background: #e9ecef;
+            border-color: #adb5bd;
+            color: #343a40;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+        }}
+
+        .btn-secondary:active {{
+            background: #dee2e6;
+            border-color: #6c757d;
+        }}
+
+        @media (max-width: 480px) {{
+            .consent-card {{
+                margin: 0 10px;
+            }}
+
+            .header, .content {{
+                padding: 24px 20px;
+            }}
+        }}
     </style>
 </head>
 <body>
-    <div class="consent-container">
+    <div class="consent-card">
         <div class="header">
-            <h1>🔐 Application Access Request</h1>
-            <p>Secure OAuth 2.0 Authorization</p>
+            <div class="logo-container">
+                <img src="/images/fctr-logo.png" alt="Fctr Identity Logo" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div style="display: none; width: 100%; height: 100%; align-items: center; justify-content: center; background: linear-gradient(135deg, #0066cc 0%, #004499 100%); color: white; font-weight: 700; font-size: 20px; border-radius: 50%;">F</div>
+            </div>
+            <h1>AI Agent Authorization</h1>
+            <div class="tenant-info">Connecting to Okta Tenant: {okta_domain}</div>
         </div>
+
         <div class="content">
-            <div class="app-info">
-                <h2>{client_name}</h2>
-                <p><strong>Client Type:</strong> {client_type}</p>
-                <p><strong>Redirect URI:</strong> {redirect_uri}</p>
-                <p><strong>Client ID:</strong> {client_id}</p>
+            <div class="client-info">
+                <div class="client-row">
+                    <span class="client-label">Application:</span>
+                    <span class="client-value">{client_name}</span>
+                </div>
+                <div class="client-row">
+                    <span class="client-label">Domain:</span>
+                    <span class="client-value">{client_domain}</span>
+                </div>
+                <div class="client-row">
+                    <span class="client-label">Platform:</span>
+                    <span class="client-value">MCP Client Application</span>
+                </div>
+                {f'''
+                <div class="client-row">
+                    <span class="client-label">Client Type:</span>
+                    <span class="client-value">{client_type_display}</span>
+                </div>
+                ''' if client_type_display else ''}
             </div>
-            <div class="permissions">
-                <h3>🔐 Requested Permissions</h3>
-                {''.join([f'<div class="permission-item">✓ {scope_descriptions.get(s, f"Access {s} resources")}</div>' for s in scopes])}
+
+            <div class="permissions-summary">
+                <h3>Requested Access</h3>
+                <div class="permission-item">
+                    <span class="permission-icon">🏢</span>
+                    <span class="permission-text">Interact with your Okta tenant</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">👤</span>
+                    <span class="permission-text">Access your profile information</span>
+                </div>
+                <div class="permission-item">
+                    <span class="permission-icon">🛠️</span>
+                    <span class="permission-text">Use MCP tools filtered for your access level</span>
+                </div>
             </div>
-            <div class="security-notice">
-                <p><strong>Security Notice:</strong> By granting access, you authorize this application to access your Okta resources 
-                according to the permissions listed above. You can revoke this access at any time.</p>
+
+            <div class="notice">
+                <p><strong>You have an AI client requesting access to the MCP Server for Okta by Fctr Identity.</strong></p>
+                <p><strong>Important:</strong> If you are not actively trying to connect an AI client or authorize access, please reject this request.</p>
             </div>
-            <form method="post" class="actions">
-                <input type="hidden" name="client_id" value="{client_id}">
-                <input type="hidden" name="redirect_uri" value="{redirect_uri}">
-                <input type="hidden" name="state" value="{state}">
-                <input type="hidden" name="scope" value="{scope}">
-                <input type="hidden" name="code_challenge" value="{code_challenge}">
-                <button type="submit" name="action" value="allow" class="btn btn-allow">✅ Allow Access</button>
-                <button type="submit" name="action" value="deny" class="btn btn-deny">❌ Deny Access</button>
-            </form>
+
+            <div class="actions">
+                <form method="post" class="action-form">
+                    <input type="hidden" name="client_id" value="{client_id}">
+                    <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                    <input type="hidden" name="state" value="{state}">
+                    <input type="hidden" name="scope" value="{scope}">
+                    <input type="hidden" name="code_challenge" value="{code_challenge}">
+                    <input type="hidden" name="action" value="allow">
+                    <button type="submit" class="btn btn-primary">Authorize</button>
+                </form>
+
+                <form method="post" class="action-form">
+                    <input type="hidden" name="client_id" value="{client_id}">
+                    <input type="hidden" name="redirect_uri" value="{redirect_uri}">
+                    <input type="hidden" name="state" value="{state}">
+                    <input type="hidden" name="action" value="deny">
+                    <button type="submit" class="btn btn-secondary">Cancel</button>
+                </form>
+            </div>
         </div>
     </div>
 </body>
@@ -1428,6 +1751,22 @@ class FastMCPOAuthServer:
             return "Web Browser"
         else:
             return "Desktop Application"
+
+    def _get_redirect_domain(self, redirect_uri: str) -> str:
+        """Extract domain from redirect URI for display"""
+        if not redirect_uri:
+            return "Unknown"
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(redirect_uri)
+            if parsed.hostname:
+                if 'localhost' in parsed.hostname or '127.0.0.1' in parsed.hostname:
+                    return f"localhost:{parsed.port or 80}"
+                else:
+                    return parsed.hostname
+            return "Invalid URI"
+        except Exception:
+            return "Parse Error"
 
     def _register_fastmcp_middleware(self):
         """Register FastMCP middleware for authentication and RBAC using proper middleware system"""

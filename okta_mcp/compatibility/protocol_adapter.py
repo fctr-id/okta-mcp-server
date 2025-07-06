@@ -36,45 +36,33 @@ class MCPProtocolAdapter:
         """
         Create a FastMCP server with enhanced compatibility for different protocol versions.
         
-        This method wraps the standard server creation and adds compatibility middleware.
+        NOTE: This method is deprecated in favor of the unified FastMCP OAuth server.
+        It is kept for backward compatibility with older entry points.
         """
-        from okta_mcp.server import create_auth_provider
+        logger.warning("protocol_adapter.create_compatible_server() is deprecated")
+        logger.warning("Use FastMCPOAuthServer from okta_mcp.fastmcp_oauth_server instead")
+        
+        # Redirect to the new unified OAuth server
+        from okta_mcp.fastmcp_oauth_server import FastMCPOAuthServer
         
         try:
-            # Create auth provider if enabled
-            auth_provider = create_auth_provider() if enable_auth else None
+            oauth_server = FastMCPOAuthServer()
             
-            # Enhanced instructions for better Claude Desktop compatibility
-            enhanced_instructions = self._get_enhanced_instructions()
+            # Store adapter reference for protocol compatibility detection
+            oauth_server.mcp._protocol_adapter = self
             
-            # Create server with compatibility-focused configuration
-            mcp = FastMCP(
-                name=self.server_name,
-                instructions=enhanced_instructions,
-                mask_error_details=False,  # Show detailed errors for debugging
-                auth=auth_provider  # Add authentication if configured
-            )
-            
-            # Initialize Okta client and register tools
-            self._initialize_okta_client(mcp)
-            self._register_tools(mcp)
-            
-            # Store adapter reference for potential future use
-            mcp._protocol_adapter = self
-            
-            auth_status = "with authentication" if auth_provider else "without authentication"
-            logger.info(f"Compatible Okta MCP server created successfully {auth_status}")
-            
-            return mcp
+            logger.info(f"Redirecting to unified FastMCP OAuth server (auth={enable_auth})")
+            return oauth_server.mcp
             
         except Exception as e:
-            logger.error(f"Error creating compatible Okta MCP server: {e}")
+            logger.error(f"Error creating unified OAuth server: {e}")
             raise
     
     def _get_enhanced_instructions(self) -> str:
         """
         Get enhanced instructions that work well with both protocol versions.
         
+        NOTE: This is kept for potential future protocol compatibility needs.
         Claude Desktop seems to prefer more detailed instructions in the initialization.
         """
         return """
@@ -107,46 +95,6 @@ The server supports both direct API access and OAuth-protected proxy modes.
 Use natural language to describe what you want to accomplish with your Okta tenant,
 and the assistant will use the appropriate tools to help you achieve your goals.
         """.strip()
-    
-    def _initialize_okta_client(self, mcp: FastMCP):
-        """Initialize the Okta client properly."""
-        from okta_mcp.utils.okta_client import OktaMcpClient, create_okta_client
-        
-        logger.info("Initializing Okta client with compatibility adapter")
-        
-        # Create the Okta SDK client first
-        org_url = os.getenv('OKTA_CLIENT_ORGURL')
-        api_token = os.getenv('OKTA_API_TOKEN')
-        okta_sdk_client = create_okta_client(org_url, api_token)
-        
-        # Now create the MCP wrapper with the SDK client
-        okta_client = OktaMcpClient(client=okta_sdk_client)
-        
-        # Store client reference
-        mcp.okta_client = okta_client
-        
-        logger.info("Okta client initialized successfully")
-    
-    def _register_tools(self, mcp: FastMCP):
-        """Register all Okta tools with the server."""
-        logger.info("Registering Okta tools with compatibility adapter")
-        
-        from okta_mcp.tools.user_tools import register_user_tools
-        from okta_mcp.tools.apps_tools import register_apps_tools
-        from okta_mcp.tools.log_events_tools import register_log_events_tools
-        from okta_mcp.tools.group_tools import register_group_tools
-        from okta_mcp.tools.policy_network_tools import register_policy_tools 
-        from okta_mcp.tools.datetime_tools import register_datetime_tools
-        
-        # Register all tool categories
-        register_user_tools(mcp, mcp.okta_client)
-        register_apps_tools(mcp, mcp.okta_client)
-        register_log_events_tools(mcp, mcp.okta_client)
-        register_group_tools(mcp, mcp.okta_client)
-        register_policy_tools(mcp, mcp.okta_client) 
-        register_datetime_tools(mcp, mcp.okta_client)
-        
-        logger.info("All Okta tools registered successfully")
     
     def detect_client_version(self, request_data: Dict[str, Any]) -> Optional[str]:
         """
@@ -253,7 +201,10 @@ def create_compatible_server(enable_auth: bool = True) -> FastMCP:
     """
     Create a compatible MCP server that works with both Claude Desktop and modern clients.
     
-    This is the main entry point that should be used instead of the original create_server.
+    NOTE: This function is deprecated in favor of the unified FastMCP OAuth server.
+    It redirects to FastMCPOAuthServer for full OAuth and RBAC support.
     """
+    logger.warning("create_compatible_server() is deprecated - redirecting to FastMCPOAuthServer")
+    
     adapter = get_adapter()
     return adapter.create_compatible_server(enable_auth)
