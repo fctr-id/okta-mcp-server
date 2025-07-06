@@ -364,6 +364,16 @@ class OAuthFastMCPProxy:
             logger.info(f"  - GET  http://{host}:{port}/oauth/permissions - View OAuth permissions")
             logger.info(f"  - GET  http://{host}:{port}/oauth/login - OAuth login")
             
+            # Keep the server running indefinitely
+            try:
+                logger.info("Server is running. Press Ctrl+C to stop.")
+                while True:
+                    await asyncio.sleep(3600)  # Sleep for 1 hour, then repeat
+            except KeyboardInterrupt:
+                logger.info("Received interrupt signal, shutting down...")
+            finally:
+                await runner.cleanup()
+            
             return runner
             
         except Exception as e:
