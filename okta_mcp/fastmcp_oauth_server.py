@@ -46,7 +46,6 @@ from okta_mcp.auth.role_mapper import OktaGroupRoleMapper
 from okta_mcp.auth.jwt_validator import JWTValidator
 from okta_mcp.oauth_proxy.models import VirtualClient, AuthorizationCode, UserConsent
 from okta_mcp.oauth_proxy.utils import generate_secure_session_key, audit_log
-from okta_mcp.middleware.oauth_rbac_middleware import OAuthRBACMiddleware
 
 logger = logging.getLogger("fastmcp_oauth_server")
 
@@ -306,8 +305,8 @@ class FastMCPOAuthServer:
         # Initialize session manager
         self.session_manager = OAuthSessionManager(self.oauth_config)
         
-        # Initialize RBAC middleware
-        self.rbac_middleware = OAuthRBACMiddleware(self.session_manager)
+        # Note: RBAC middleware is implemented directly in _register_fastmcp_middleware()
+        # This external middleware class is not actually used
         
         # Create FastMCP server
         self.mcp = FastMCP(
@@ -1778,9 +1777,18 @@ class FastMCPOAuthServer:
         class OAuthRBACMiddleware(Middleware):
             """FastMCP middleware for OAuth authentication and RBAC"""
             
-            def __init__(self, session_manager, rbac_middleware):
+            def __init__(self, session_manager):
                 self.session_manager = session_manager
-                self.rbac_middleware = rbac_middleware
+                # Load RBAC config directly instead of using external middleware
+                import json
+                import os
+                config_path = os.path.join(os.path.dirname(__file__), 'auth', 'rbac_config.json')
+                try:
+                    with open(config_path, 'r') as f:
+                        self.role_config = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError) as e:
+                    logger.error(f"Failed to load RBAC config: {e}")
+                    self.role_config = {"roles": {"viewer": {"level": 1}}, "tools": {}}
                 super().__init__()
             
             async def on_list_tools(self, context: MiddlewareContext, call_next):
@@ -1810,7 +1818,13 @@ class FastMCPOAuthServer:
                         
                         for tool in all_tools:
                             tool_name = tool.name if hasattr(tool, 'name') else str(tool)
-                            if self.rbac_middleware.can_execute_tool(tool_name, user_role):
+                            
+                            # Check RBAC permission directly
+                            user_level = self.role_config.get('roles', {}).get(user_role, {}).get('level', 0)
+                            tool_permissions = self.role_config.get('tools', {})
+                            required_level = tool_permissions.get(tool_name, {}).get('min_level', 1)
+                            
+                            if user_level >= required_level:
                                 filtered_tools.append(tool)
                     else:
                         # Handle dict/object format if needed
@@ -1853,8 +1867,12 @@ class FastMCPOAuthServer:
                     user_role = user_info.get('role')
                     logger.info(f"Tool '{tool_name}' called by user {user_info.get('email') or user_info.get('user_id', 'unknown')} with role {user_role}")
                     
-                    # Check RBAC permissions
-                    if not self.rbac_middleware.can_execute_tool(tool_name, user_role):
+                    # Check RBAC permissions directly
+                    user_level = self.role_config.get('roles', {}).get(user_role, {}).get('level', 0)
+                    tool_permissions = self.role_config.get('tools', {})
+                    required_level = tool_permissions.get(tool_name, {}).get('min_level', 1)
+                    
+                    if user_level < required_level:
                         logger.warning(f"Tool '{tool_name}' execution denied for role {user_role}")
                         audit_log("call_tool_forbidden", 
                                  user_id=user_info.get('user_id'),
@@ -1908,7 +1926,7 @@ class FastMCPOAuthServer:
                     raise McpError(ErrorData(code=-32000, message=f"Tool execution error: {str(e)}"))
         
         # Add the middleware to our FastMCP server
-        middleware = OAuthRBACMiddleware(self.session_manager, self.rbac_middleware)
+        middleware = OAuthRBACMiddleware(self.session_manager)
         self.mcp.add_middleware(middleware)
         
         logger.info("FastMCP middleware registered successfully")

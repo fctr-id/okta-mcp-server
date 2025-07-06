@@ -130,7 +130,6 @@ def configure_logging(log_level=None, console_level=None, suppress_mcp_logs=True
         logging.getLogger("okta_mcp").setLevel(logging.WARNING)
         logging.getLogger("okta_mcp.utils").setLevel(logging.WARNING)
         logging.getLogger("okta_mcp.tools").setLevel(logging.WARNING)
-        logging.getLogger("okta_mcp.tools.tool_registry").setLevel(logging.WARNING)
     
     return root_logger
 
@@ -208,7 +207,6 @@ def setup_protocol_logging(logger_name="okta-mcp-server", fs_logger_name="filesy
     logging.getLogger("okta_mcp").setLevel(logging.WARNING)
     logging.getLogger("okta_mcp.utils").setLevel(logging.WARNING)
     logging.getLogger("okta_mcp.tools").setLevel(logging.WARNING)
-    logging.getLogger("okta_mcp.tools.tool_registry").setLevel(logging.WARNING)
     
     return protocol_logger, fs_logger
 

@@ -63,4 +63,4 @@ ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iu
 FROM base AS oauth-proxy
 ENV TRANSPORT_TYPE=oauth-proxy
 EXPOSE 3001
-ENTRYPOINT ["python", "okta_mcp/oauth_proxy/server.py", "--host=0.0.0.0", "--port=3001"]
+ENTRYPOINT ["python", "-m", "okta_mcp.run_server", "mcp-with-auth", "--host=0.0.0.0", "--port=3001"]
