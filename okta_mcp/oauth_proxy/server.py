@@ -34,7 +34,7 @@ from okta_mcp.oauth_proxy.utils import generate_secure_session_key, setup_loggin
 from okta_mcp.oauth_proxy.auth_handler import AuthHandler
 from okta_mcp.oauth_proxy.ui_handlers import UIHandlers
 from okta_mcp.oauth_proxy.discovery_handler import DiscoveryHandler
-from okta_mcp.oauth_proxy.simple_oauth_mcp_handler import OAuthMCPHandler
+import httpx
 
 logger = logging.getLogger("oauth_proxy")
 
@@ -64,8 +64,8 @@ class OAuthFastMCPProxy:
         self.ui_handlers = UIHandlers(self.auth_handler)
         self.discovery_handler = DiscoveryHandler(self.config)
         
-        # OAuth MCP handler will be initialized later in run() method
-        self.oauth_mcp_handler = None
+        # FastMCP server endpoint
+        self.fastmcp_endpoint = "http://localhost:3000/mcp"
         
         # Setup HTTP application
         self.app = web.Application()
@@ -184,15 +184,72 @@ class OAuthFastMCPProxy:
             images_path = './images/'
         
         self.app.router.add_static('/images/', path=images_path, name='images')
+        
+        # Add the main MCP protocol endpoint
+        self.app.router.add_route('*', '/oauth_mcp', self._oauth_mcp_proxy)
+    
+    async def _oauth_mcp_proxy(self, request: web.Request) -> web.Response:
+        """Proxy MCP requests to FastMCP server with OAuth authentication and role context"""
+        try:
+            # Validate OAuth session
+            user_info = await self.auth_handler.get_user_from_request(request)
+            if not user_info:
+                from okta_mcp.oauth_proxy.utils import create_401_response
+                return create_401_response(request, "Authentication required for MCP requests")
+            
+            # Get user role and ID
+            user_role = user_info.get('role', 'viewer')
+            user_id = user_info.get('user_id', 'unknown')
+            
+            # Get the request data
+            if request.method in ['POST', 'PUT', 'PATCH']:
+                request_data = await request.json()
+            else:
+                request_data = {}
+            
+            # Forward to FastMCP server with user context in headers
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.fastmcp_endpoint,
+                    headers={
+                        "X-User-Role": user_role,
+                        "X-User-ID": user_id,
+                        "Content-Type": "application/json"
+                    },
+                    json=request_data,
+                    timeout=30.0
+                )
+                
+                return web.Response(
+                    body=response.content,
+                    status=response.status_code,
+                    headers={"Content-Type": "application/json"}
+                )
+                
+        except httpx.ConnectError:
+            logger.error(f"Failed to connect to FastMCP server at {self.fastmcp_endpoint}")
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32603,
+                    "message": "MCP server unavailable"
+                },
+                "id": None
+            }, status=503)
+        except Exception as e:
+            logger.error(f"Error in MCP proxy: {e}")
+            return web.json_response({
+                "jsonrpc": "2.0", 
+                "error": {
+                    "code": -32603,
+                    "message": "Internal proxy error"
+                },
+                "id": None
+            }, status=500)
     
     async def _setup_oauth_mcp_routes(self):
-        """Setup OAuth MCP routes after the OAuth MCP handler is initialized"""
-        if self.oauth_mcp_handler:
-            # Add the main MCP protocol endpoint
-            self.app.router.add_route('*', '/oauth_mcp', self.oauth_mcp_handler.handle_mcp_request)
-            logger.info("OAuth MCP routes configured successfully")
-        else:
-            logger.error("Cannot setup OAuth MCP routes - OAuth MCP handler not initialized")
+        """Setup OAuth MCP routes - now integrated in _setup_routes"""
+        logger.info("OAuth MCP routes configured successfully")
     
     async def _home(self, request: web.Request) -> web.Response:
         """Home page with OAuth status and MCP info"""
@@ -272,16 +329,10 @@ class OAuthFastMCPProxy:
         try:
             logger.info(f"Starting OAuth FastMCP proxy server on {host}:{port}")
             
-            # Initialize the OAuth MCP handler
-            logger.info("Initializing OAuth MCP handler...")
-            self.oauth_mcp_handler = OAuthMCPHandler(self.auth_handler)
+            # MCP routes are already configured in _setup_routes()
+            logger.info("OAuth MCP proxy configured successfully")
             
-            # Initialize tools asynchronously
-            logger.info("Loading tools for OAuth MCP handler...")
-            await self.oauth_mcp_handler._initialize_tools_async()
-            logger.info("OAuth MCP handler initialized successfully")
-            
-            # Now setup the OAuth MCP routes
+            # Setup the OAuth MCP routes (just logs success now)
             await self._setup_oauth_mcp_routes()
             
             # Start periodic cleanup task for expired entries

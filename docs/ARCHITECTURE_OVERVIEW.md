@@ -65,14 +65,14 @@ okta-mcp-server-2/
 │   ├── server.py                     # Core MCP server (STDIO/HTTP)
 │   ├── auth/
 │   │   ├── oauth_provider.py         # OAuth configuration
-│   │   ├── scope_validator.py        # Scope validation
-│   │   ├── token_storage.py          # Token management
+│   │   ├── role_mapper.py            # Group to role mapping
 │   │   └── rbac_config.json          # RBAC configuration
 │   ├── oauth_proxy/
 │   │   ├── server.py                 # OAuth proxy server (HTTP)
-│   │   ├── simple_oauth_mcp_handler.py # OAuth MCP endpoint handler
 │   │   ├── auth_handler.py           # OAuth flow handlers
 │   │   ├── discovery_handler.py      # OAuth discovery endpoints
+│   │   ├── ui_handlers.py            # Consent page UI
+│   │   ├── models.py                 # OAuth data models
 │   │   └── utils.py                  # Shared utilities
 │   ├── middleware/
 │   │   └── authorization.py          # RBAC filtering logic
