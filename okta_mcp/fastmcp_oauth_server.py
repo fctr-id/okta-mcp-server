@@ -366,31 +366,6 @@ class FastMCPOAuthServer:
     def _register_oauth_routes(self):
         """Register OAuth endpoints as FastMCP custom routes"""
         
-        @self.mcp.custom_route("/mcp", methods=["GET", "POST", "OPTIONS"])
-        @self.mcp.custom_route("/mcp/", methods=["GET", "POST", "OPTIONS"])
-        async def mcp_oauth_endpoint(request: Request) -> Response:
-            """MCP endpoint with OAuth authentication - returns 401 with WWW-Authenticate for unauthenticated requests"""
-            
-            # Handle CORS preflight
-            if request.method == "OPTIONS":
-                response = JSONResponse({})
-                response.headers["Access-Control-Allow-Origin"] = "*"
-                response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, mcp-protocol-version"
-                return self.session_manager.add_security_headers(response)
-            
-            # The authentication is now handled by the middleware
-            # This endpoint should never be reached without authentication due to middleware
-            # But we'll keep this as a fallback
-            user_info = await self.session_manager.get_user_from_session(request)
-            if not user_info:
-                logger.warning("MCP endpoint reached without authentication despite middleware")
-                return self.session_manager.create_401_response(request, "MCP endpoint requires authentication")
-            
-            # Continue with normal MCP processing
-            # This would normally be handled by FastMCP's internal routing
-            return JSONResponse({"error": "This endpoint should be handled by FastMCP's internal MCP routing"})
-        
         @self.mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET", "OPTIONS"])
         async def oauth_protected_resource_metadata(request: Request) -> JSONResponse:
             """OAuth 2.0 Resource Server Metadata (RFC 8414 extension)"""
@@ -617,6 +592,9 @@ class FastMCPOAuthServer:
                 auth_code = secrets.token_urlsafe(32)
                 code_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
                 
+                # Get the role for the authenticated user
+                user_role = user_info.get('role', 'viewer')  # From session/token data
+                
                 auth_code_obj = AuthorizationCode(
                     code=auth_code,
                     client_id=client_id,
@@ -626,7 +604,8 @@ class FastMCPOAuthServer:
                     code_challenge_method="S256",
                     redirect_uri=redirect_uri,
                     created_at=datetime.now(timezone.utc),
-                    expires_at=code_expires_at
+                    expires_at=code_expires_at,
+                    rbac_role=user_role
                 )
                 
                 self.session_manager.authorization_codes[auth_code] = auth_code_obj.__dict__
@@ -1005,10 +984,9 @@ class FastMCPOAuthServer:
                 auth_code = secrets.token_urlsafe(32)
                 code_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
                 
-                # DEBUG: Log user_info to see what we have
+                # Get the role that was determined earlier in the OAuth callback
                 user_id_from_okta = user_info.get('user_id')  # JWT validator already mapped 'sub' -> 'user_id'
-                logger.info(f"🔍 DEBUG: Creating auth code - user_info keys: {list(user_info.keys())}")
-                logger.info(f"🔍 DEBUG: Creating auth code - user_id from user_info: {user_id_from_okta}")
+                user_role = session_user_info.get('rbac_role', 'viewer')
                 
                 auth_code_obj = AuthorizationCode(
                     code=auth_code,
@@ -1019,10 +997,11 @@ class FastMCPOAuthServer:
                     code_challenge_method="S256",
                     redirect_uri=original_redirect_uri,
                     created_at=datetime.now(timezone.utc),
-                    expires_at=code_expires_at
+                    expires_at=code_expires_at,
+                    rbac_role=user_role
                 )
                 
-                # DEBUG: Log what gets stored - convert to dict explicitly
+                # Convert to dict explicitly for consistent storage
                 auth_code_dict = {
                     'code': auth_code_obj.code,
                     'client_id': auth_code_obj.client_id,
@@ -1033,10 +1012,10 @@ class FastMCPOAuthServer:
                     'redirect_uri': auth_code_obj.redirect_uri,
                     'created_at': auth_code_obj.created_at,
                     'expires_at': auth_code_obj.expires_at,
+                    'rbac_role': auth_code_obj.rbac_role,  # Include role in stored data
                     'used': getattr(auth_code_obj, 'used', False)
                 }
                 
-                logger.info(f"🔍 DEBUG: Storing auth code with user_id: {auth_code_dict['user_id']}")
                 self.session_manager.authorization_codes[auth_code] = auth_code_dict
                 
                 # Redirect back to the original client
@@ -1077,11 +1056,6 @@ class FastMCPOAuthServer:
             
         auth_code_obj = self.session_manager.authorization_codes[code]
         
-        # DEBUG: Log what we retrieve from the authorization code
-        logger.info(f"🔍 DEBUG: Retrieved auth code - user_id: {auth_code_obj.get('user_id')}")
-        logger.info(f"🔍 DEBUG: Retrieved auth code - all keys: {list(auth_code_obj.keys())}")
-        logger.info(f"🔍 DEBUG: Retrieved auth code - full object: {auth_code_obj}")
-        
         # Verify client and expiration
         if auth_code_obj["client_id"] != client_id:
             response = JSONResponse({"error": "invalid_client"}, status_code=400)
@@ -1114,11 +1088,6 @@ class FastMCPOAuthServer:
         # Store virtual token mapping (NO real Okta tokens stored here)
         user_id = auth_code_obj["user_id"]
         
-        # DEBUG: Log user_id extraction for audit logging
-        logger.info(f"🔍 DEBUG: Token issuance - extracted user_id: {user_id}")
-        logger.info(f"🔍 DEBUG: Token issuance - auth_code_obj user_id: {auth_code_obj.get('user_id')}")
-        logger.info(f"🔍 DEBUG: About to call audit_log with user_id: {user_id}")
-        
         virtual_token_data = {
             "access_token": virtual_access_token,
             "token_type": "Bearer",
@@ -1127,6 +1096,7 @@ class FastMCPOAuthServer:
             "scopes": auth_code_obj["scopes"],
             "client_id": client_id,
             "user_id": user_id,
+            "rbac_role": auth_code_obj.get("rbac_role", "viewer"),  # Include role for RBAC
             "grant_type": "authorization_code"
         }
         
@@ -1485,46 +1455,52 @@ class FastMCPOAuthServer:
                         audit_log("list_tools_unauthorized", details={"endpoint": "/mcp"})
                         
                         # Return empty list for unauthenticated requests
-                        from fastmcp.server.middleware import ListToolsResult
-                        return ListToolsResult(tools={})
+                        return []
                     
                     user_role = user_info.get('role')
-                    logger.info(f"list_tools called by user {user_info.get('email')} with role {user_role}")
+                    logger.info(f"list_tools called by user {user_info.get('email') or user_info.get('user_id', 'unknown')} with role {user_role}")
                     
                     # Get all available tools from the original handler
                     result = await call_next(context)
                     
-                    # Filter tools based on RBAC
-                    filtered_tools = {}
-                    for name, tool in result.tools.items():
-                        if self.rbac_middleware.can_execute_tool(name, user_role):
-                            filtered_tools[name] = tool
+                    # Handle both list and dict formats
+                    if isinstance(result, list):
+                        # FastMCP returns a list of tools
+                        all_tools = result
+                        filtered_tools = []
+                        
+                        for tool in all_tools:
+                            tool_name = tool.name if hasattr(tool, 'name') else str(tool)
+                            if self.rbac_middleware.can_execute_tool(tool_name, user_role):
+                                filtered_tools.append(tool)
+                    else:
+                        # Handle dict/object format if needed
+                        filtered_tools = result
                     
                     audit_log("list_tools_filtered", 
                              user_id=user_info.get('user_id'),
                              details={
                                  "user_role": user_role,
-                                 "total_tools": len(result.tools),
-                                 "filtered_tools": len(filtered_tools)
+                                 "total_tools": len(all_tools) if isinstance(result, list) else 0,
+                                 "filtered_tools": len(filtered_tools) if isinstance(filtered_tools, list) else 0
                              })
                     
-                    logger.info(f"Filtered {len(result.tools)} tools to {len(filtered_tools)} for role {user_role}")
+                    logger.info(f"Filtered {len(all_tools) if isinstance(result, list) else 'unknown'} tools to {len(filtered_tools) if isinstance(filtered_tools, list) else 'unknown'} for role {user_role}")
                     
-                    # Return modified result
-                    from fastmcp.server.middleware import ListToolsResult
-                    return ListToolsResult(tools=filtered_tools)
+                    return filtered_tools
                     
                 except Exception as e:
                     logger.error(f"Error in list_tools middleware: {e}")
                     audit_log("list_tools_error", details={"error": str(e)})
-                    from fastmcp.server.middleware import ListToolsResult
-                    return ListToolsResult(tools={})
+                    return []
             
             async def on_call_tool(self, context: MiddlewareContext, call_next):
                 """Authenticate and authorize tool execution"""
+                tool_name = "unknown"  # Initialize early to avoid unbound variable errors
                 try:
-                    tool_name = context.message.params.get("name") if context.message.params else "unknown"
-                    arguments = context.message.params.get("arguments", {}) if context.message.params else {}
+                    # FastMCP v2.10 format - tool name and arguments are directly on the message
+                    tool_name = getattr(context.message, 'name', "unknown")
+                    arguments = getattr(context.message, 'arguments', {})
                     
                     # Get user from context (set by HTTP middleware)
                     user_info = self.session_manager.get_current_user()
@@ -1536,7 +1512,7 @@ class FastMCPOAuthServer:
                         raise McpError(ErrorData(code=-32000, message="Authentication required to execute tools"))
                     
                     user_role = user_info.get('role')
-                    logger.info(f"Tool '{tool_name}' called by user {user_info.get('email')} with role {user_role}")
+                    logger.info(f"Tool '{tool_name}' called by user {user_info.get('email') or user_info.get('user_id', 'unknown')} with role {user_role}")
                     
                     # Check RBAC permissions
                     if not self.rbac_middleware.can_execute_tool(tool_name, user_role):
@@ -1560,7 +1536,7 @@ class FastMCPOAuthServer:
                              })
                     
                     # Execute the tool via the original handler
-                    logger.info(f"Executing tool '{tool_name}' for user {user_info.get('email')}")
+                    logger.info(f"Executing tool '{tool_name}' for user {user_info.get('email') or user_info.get('user_id', 'unknown')}")
                     result = await call_next(context)
                     
                     audit_log("call_tool_success", 
@@ -1591,80 +1567,6 @@ class FastMCPOAuthServer:
                                  "error": str(e)
                              })
                     raise McpError(ErrorData(code=-32000, message=f"Tool execution error: {str(e)}"))
-            
-            async def on_list_resources(self, context: MiddlewareContext, call_next):
-                """Filter resources based on user authentication"""
-                try:
-                    # Get user from context (set by HTTP middleware)
-                    user_info = self.session_manager.get_current_user()
-                    
-                    if not user_info:
-                        logger.warning("list_resources called without authentication")
-                        audit_log("list_resources_unauthorized", details={"endpoint": "/mcp"})
-                        from fastmcp.server.middleware import ListResourcesResult
-                        return ListResourcesResult(resources={})
-                    
-                    logger.info(f"list_resources called by user {user_info.get('email')}")
-                    
-                    # Get all available resources from the original handler
-                    result = await call_next(context)
-                    
-                    audit_log("list_resources_success", 
-                             user_id=user_info.get('user_id'),
-                             details={"resource_count": len(result.resources)})
-                    
-                    return result
-                    
-                except Exception as e:
-                    logger.error(f"Error in list_resources middleware: {e}")
-                    audit_log("list_resources_error", details={"error": str(e)})
-                    from fastmcp.server.middleware import ListResourcesResult
-                    return ListResourcesResult(resources={})
-            
-            async def on_read_resource(self, context: MiddlewareContext, call_next):
-                """Authenticate resource access"""
-                try:
-                    uri = context.message.params.get("uri") if context.message.params else "unknown"
-                    
-                    # Get user from context (set by HTTP middleware)
-                    user_info = self.session_manager.get_current_user()
-                    
-                    if not user_info:
-                        logger.warning(f"Resource '{uri}' accessed without authentication")
-                        audit_log("read_resource_unauthorized", 
-                                 details={"uri": uri, "endpoint": "/mcp"})
-                        raise McpError(ErrorData(code=-32000, message="Authentication required to access resources"))
-                    
-                    logger.info(f"Resource '{uri}' accessed by user {user_info.get('email')}")
-                    
-                    # Execute the resource read via the original handler
-                    result = await call_next(context)
-                    
-                    audit_log("read_resource_success", 
-                             user_id=user_info.get('user_id'),
-                             details={"uri": uri})
-                    
-                    return result
-                    
-                except McpError:
-                    # Re-raise MCP errors  
-                    raise
-                except Exception as e:
-                    logger.error(f"Error reading resource '{uri}': {e}")
-                    # Get user info safely for audit logging
-                    try:
-                        current_user = self.session_manager.get_current_user()
-                        user_id = current_user.get('user_id') if current_user else None
-                    except:
-                        user_id = None
-                    
-                    audit_log("read_resource_error", 
-                             user_id=user_id,
-                             details={
-                                 "uri": uri,
-                                 "error": str(e)
-                             })
-                    raise McpError(ErrorData(code=-32000, message=f"Resource access error: {str(e)}"))
         
         # Add the middleware to our FastMCP server
         middleware = OAuthRBACMiddleware(self.session_manager, self.rbac_middleware)
@@ -1751,7 +1653,7 @@ class FastMCPOAuthServer:
                         
                         return self.session_manager.add_security_headers(response)
                     else:
-                        logger.info(f"MCP endpoint {request.url.path} accessed by authenticated user: {user_info.get('email')}")
+                        logger.info(f"MCP endpoint {request.url.path} accessed by authenticated user: {user_info.get('email') or user_info.get('user_id', 'unknown')}")
                         audit_log("mcp_http_authenticated", 
                                  user_id=user_info.get('user_id'),
                                  details={
@@ -1762,7 +1664,6 @@ class FastMCPOAuthServer:
                 
                 # Continue to next middleware/handler
                 response = await call_next(request)
-                return response
                 return response
         
         # Add the authentication middleware to the app

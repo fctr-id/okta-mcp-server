@@ -30,6 +30,7 @@ class AuthorizationCode:
     redirect_uri: str
     created_at: datetime
     expires_at: datetime
+    rbac_role: str = "viewer"  # Default role for RBAC
     used: bool = False
 
 
