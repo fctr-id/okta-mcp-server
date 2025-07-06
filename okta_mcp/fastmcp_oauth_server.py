@@ -388,11 +388,15 @@ class FastMCPOAuthServer:
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type"
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, User-Agent, Accept, Accept-Language, Accept-Encoding, Cache-Control, Connection, Host, Origin, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site"
                     }
                 )
             
+            # Force HTTPS for cloud deployments (avoid HTTP->HTTPS redirects that break CORS preflight)
             base_url = f"{request.url.scheme}://{request.url.netloc}"
+            if "ondigitalocean.app" in request.url.netloc or "herokuapp.com" in request.url.netloc:
+                base_url = f"https://{request.url.netloc}"
+            
             metadata = {
                 "resource": f"{base_url}/mcp",
                 "authorization_servers": [base_url],
@@ -415,11 +419,15 @@ class FastMCPOAuthServer:
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "GET, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type"
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, User-Agent, Accept, Accept-Language, Accept-Encoding, Cache-Control, Connection, Host, Origin, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site"
                     }
                 )
             
+            # Force HTTPS for cloud deployments (avoid HTTP->HTTPS redirects that break CORS preflight)
             base_url = f"{request.url.scheme}://{request.url.netloc}"
+            if "ondigitalocean.app" in request.url.netloc or "herokuapp.com" in request.url.netloc:
+                base_url = f"https://{request.url.netloc}"
+            
             metadata = {
                 "issuer": base_url,
                 "authorization_endpoint": f"{base_url}/oauth/authorize",  # Our virtual endpoint
@@ -452,18 +460,28 @@ class FastMCPOAuthServer:
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type"
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, User-Agent, Accept, Accept-Language, Accept-Encoding, Cache-Control, Connection, Host, Origin, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site"
                     }
                 )
             
             if request.method == "GET":
-                # Return information about the dynamic client registration endpoint
-                # This is not part of RFC 7591 but some clients expect it for discovery
+                # Return RFC 7591 compliant dynamic client registration metadata
+                # Force HTTPS for cloud deployments
+                base_url = f"{request.url.scheme}://{request.url.netloc}"
+                if "ondigitalocean.app" in request.url.netloc or "herokuapp.com" in request.url.netloc:
+                    base_url = f"https://{request.url.netloc}"
+                
                 response_data = {
-                    "endpoint": "/oauth2/v1/clients",
-                    "methods_supported": ["POST"],
-                    "description": "OAuth 2.0 Dynamic Client Registration endpoint",
-                    "documentation_url": "https://tools.ietf.org/html/rfc7591"
+                    "client_registration_endpoint": f"{base_url}/oauth2/v1/clients",
+                    "client_registration_authn_methods_supported": ["none"],
+                    "token_endpoint_auth_methods_supported": ["client_secret_post", "none"],
+                    "response_types_supported": ["code"],
+                    "grant_types_supported": ["authorization_code", "refresh_token"],
+                    "scopes_supported": self.oauth_config.get_all_scopes(),
+                    "code_challenge_methods_supported": ["S256"],
+                    "subject_types_supported": ["public"],
+                    "id_token_signing_alg_values_supported": ["RS256"],
+                    "registration_endpoint": f"{base_url}/oauth2/v1/clients"
                 }
                 response = JSONResponse(response_data)
                 response.headers["Access-Control-Allow-Origin"] = "*"
@@ -805,7 +823,7 @@ class FastMCPOAuthServer:
                     headers={
                         "Access-Control-Allow-Origin": "*",
                         "Access-Control-Allow-Methods": "POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+                        "Access-Control-Allow-Headers": "Content-Type, Authorization, User-Agent, Accept, Accept-Language, Accept-Encoding, Cache-Control, Connection, Host, Origin, Referer, Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Fetch-Site"
                     }
                 )
                 
@@ -2038,12 +2056,39 @@ class FastMCPOAuthServer:
             async def dispatch(self, request, call_next):
                 """Middleware to handle MCP endpoint authentication at HTTP level"""
                 
-                # Handle CORS preflight for all requests
+                # Handle CORS preflight for all requests with comprehensive headers
                 if request.method == "OPTIONS":
                     response = Response(status_code=200)
-                    response.headers["Access-Control-Allow-Origin"] = "*" 
-                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-                    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, mcp-protocol-version"
+                    
+                    # Get any requested headers from the preflight request
+                    requested_headers = request.headers.get("access-control-request-headers", "")
+                    
+                    # Comprehensive CORS headers for MCP Inspector compatibility
+                    response.headers["Access-Control-Allow-Origin"] = "*"
+                    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+                    
+                    # Allow all commonly used headers plus any specifically requested
+                    allowed_headers = [
+                        "Content-Type", "Authorization", "Accept", "Origin", "User-Agent",
+                        "mcp-protocol-version", "X-Requested-With", "Cache-Control",
+                        "Access-Control-Request-Method", "Access-Control-Request-Headers",
+                        "Accept-Language", "Accept-Encoding", "Connection", "Host", 
+                        "Referer", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site",
+                        "Pragma", "DNT", "Upgrade-Insecure-Requests", "If-Modified-Since",
+                        "If-None-Match", "X-Forwarded-For", "X-Forwarded-Proto", "X-Real-IP"
+                    ]
+                    
+                    # Add any specifically requested headers
+                    if requested_headers:
+                        requested_list = [h.strip() for h in requested_headers.split(",")]
+                        allowed_headers.extend(requested_list)
+                    
+                    response.headers["Access-Control-Allow-Headers"] = ", ".join(set(allowed_headers))
+                    response.headers["Access-Control-Allow-Credentials"] = "true"
+                    response.headers["Access-Control-Max-Age"] = "86400"  # 24 hours
+                    response.headers["Access-Control-Expose-Headers"] = (
+                        "Content-Type, Authorization, mcp-protocol-version, WWW-Authenticate"
+                    )
                     return self.session_manager.add_security_headers(response)
                 
                 # Get user authentication for all requests (not just MCP endpoints)
@@ -2097,16 +2142,29 @@ class FastMCPOAuthServer:
                 
                 # Continue to next middleware/handler
                 response = await call_next(request)
+                
+                # Add CORS headers to all responses for MCP Inspector compatibility
+                response.headers["Access-Control-Allow-Origin"] = "*"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD"
+                response.headers["Access-Control-Allow-Headers"] = (
+                    "Content-Type, Authorization, Accept, Origin, User-Agent, "
+                    "mcp-protocol-version, X-Requested-With, Cache-Control, "
+                    "Accept-Language, Accept-Encoding, Connection, Host, Referer"
+                )
+                response.headers["Access-Control-Expose-Headers"] = (
+                    "Content-Type, Authorization, mcp-protocol-version, WWW-Authenticate"
+                )
+                
                 return response
         
         # Add the authentication middleware to the app
         app.add_middleware(MCPAuthMiddleware, session_manager=self.session_manager)
-        
+
         logger.info("ASGI application created with session and authentication middleware")
         return app
     
     async def run(self, host: str = "localhost", port: int = 3001):
-        """Run the unified OAuth MCP server with security enhancements"""
+        """Run the unified OAuth MCP server with SSE transport for MCP protocol"""
         try:
             logger.info(f"Starting FastMCP OAuth server on {host}:{port}")
             logger.info("Security features enabled:")
@@ -2115,9 +2173,6 @@ class FastMCPOAuthServer:
             logger.info("  ✅ RBAC enforcement")
             logger.info("  ✅ Audit logging")
             logger.info("  ✅ Session security")
-            
-            # Create ASGI app
-            app = self.create_app(host, port)
             
             # Start periodic cleanup task
             async def periodic_cleanup():
@@ -2132,7 +2187,14 @@ class FastMCPOAuthServer:
             cleanup_task = asyncio.create_task(periodic_cleanup())
             
             try:
-                # Run with uvicorn server
+                # Use custom ASGI app with OAuth middleware instead of FastMCP's built-in transport
+                # This ensures all requests go through our OAuth authentication middleware
+                logger.info("🚀 Starting server with custom OAuth-protected HTTP transport")
+                
+                # Create the ASGI app with our OAuth middleware
+                app = self.create_app(host, port)
+                
+                # Run with uvicorn server (ensures OAuth middleware is active)
                 import uvicorn
                 config = uvicorn.Config(app, host=host, port=port, log_level="info")
                 server = uvicorn.Server(config)
