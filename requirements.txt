@@ -16,6 +16,7 @@ cryptography>=41.0.0
 authlib>=1.2.0
 python-jose[cryptography]>=3.3.0
 aiohttp-session>=2.12.0
+itsdangerous>=2.2.0
 
 # CLI and Development
 rich>=13.0.0
