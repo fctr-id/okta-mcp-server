@@ -573,9 +573,17 @@ class FastMCPOAuthServer:
                 
                 virtual_client = self.session_manager.virtual_clients[client_id]
                 
-                # Check for pending consent (use memory storage for FastMCP compatibility)
+                # Check for pending consent (check both session and memory storage)
                 consent_key = f"consent_{client_id}"
-                pending_consent = self.session_manager.state_store.get(consent_key)
+                pending_consent = None
+                
+                # Try session first
+                if hasattr(request, 'session') and consent_key in request.session:
+                    pending_consent = request.session[consent_key]
+                    logger.debug(f"Found consent in session for {consent_key}")
+                elif consent_key in self.session_manager.state_store:
+                    pending_consent = self.session_manager.state_store.get(consent_key)
+                    logger.debug(f"Found consent in memory for {consent_key}")
                 
                 # Check if user is already authenticated
                 user_info = await self.session_manager.get_user_from_session(request)
@@ -602,8 +610,8 @@ class FastMCPOAuthServer:
                     # Generate proxy state for this authorization request (like old code)
                     proxy_state = secrets.token_urlsafe(64)
                     
-                    # Store virtual client info with proxy state
-                    self.session_manager.state_store[proxy_state] = {
+                    # Store virtual client info with proxy state (both in memory and session)
+                    state_info = {
                         'virtual_client_id': client_id,
                         'original_redirect_uri': redirect_uri,
                         'original_state': state,
@@ -613,14 +621,29 @@ class FastMCPOAuthServer:
                         'timestamp': datetime.now(timezone.utc).isoformat()
                     }
                     
+                    # Store in memory (for local dev)
+                    self.session_manager.state_store[proxy_state] = state_info
+                    
+                    # Also store in session (for cloud deployments)
+                    if hasattr(request, 'session'):
+                        request.session[f"oauth_state_{proxy_state}"] = state_info
+                        logger.debug(f"Stored state {proxy_state} in session")
+                    else:
+                        logger.warning("No session available, using only in-memory state storage")
+                    
                     # Generate PKCE parameters for Okta
                     code_verifier = secrets.token_urlsafe(64)
                     okta_code_challenge = base64.urlsafe_b64encode(
                         hashlib.sha256(code_verifier.encode('ascii')).digest()
                     ).decode('ascii').strip('=')
                     
-                    # Store PKCE verifier
-                    self.session_manager.state_store[proxy_state]['code_verifier'] = code_verifier
+                    # Store PKCE verifier in both memory and session
+                    if proxy_state in self.session_manager.state_store:
+                        self.session_manager.state_store[proxy_state]['code_verifier'] = code_verifier
+                    
+                    if hasattr(request, 'session') and f"oauth_state_{proxy_state}" in request.session:
+                        request.session[f"oauth_state_{proxy_state}"]['code_verifier'] = code_verifier
+                        logger.debug(f"Updated state {proxy_state} with code_verifier in session")
                     
                     # Clear pending consent from both session and memory storage
                     consent_key = f"consent_{client_id}"
@@ -628,7 +651,8 @@ class FastMCPOAuthServer:
                     
                     try:
                         if hasattr(request, 'session') and hasattr(request.session, 'pop'):
-                            request.session.pop('pending_consent', None)
+                            request.session.pop(consent_key, None)
+                            logger.debug(f"Cleared consent {consent_key} from session")
                     except Exception as e:
                         logger.debug(f"Could not clear session consent (normal for FastMCP routes): {e}")
                     
@@ -784,10 +808,11 @@ class FastMCPOAuthServer:
                     # Store in memory (reliable for FastMCP custom routes)
                     self.session_manager.state_store[consent_key] = consent_data
                     
-                    # Also try to store in session if available
+                    # Also store in session using consistent key pattern
                     try:
                         if hasattr(request, 'session') and hasattr(request.session, '__setitem__'):
-                            request.session['pending_consent'] = consent_data
+                            request.session[consent_key] = consent_data
+                            logger.debug(f"Stored consent {consent_key} in session")
                     except Exception as e:
                         logger.debug(f"Could not store consent in session (normal for FastMCP routes): {e}")
                     
@@ -943,12 +968,32 @@ class FastMCPOAuthServer:
                 if not code or not state:
                     return Response("Missing code or state parameter", status_code=400)
                 
-                # Retrieve stored state information
-                if state not in self.session_manager.state_store:
-                    logger.error(f"Invalid or expired state: {state}")
+                # Retrieve stored state information (try session first, fallback to in-memory)
+                state_data = None
+                
+                # First try to get from session (more reliable for cloud deployments)
+                if hasattr(request, 'session') and f"oauth_state_{state}" in request.session:
+                    state_data = request.session[f"oauth_state_{state}"]
+                    logger.info(f"Found state in session for {state}")
+                    # Clean up from session
+                    del request.session[f"oauth_state_{state}"]
+                elif state in self.session_manager.state_store:
+                    state_data = self.session_manager.state_store[state]
+                    logger.info(f"Found state in memory store for {state}")
+                    # Clean up from memory store
+                    del self.session_manager.state_store[state]
+                else:
+                    logger.error(f"Invalid or expired state: {state} (not found in session or memory)")
+                    # Debug: list available states
+                    logger.debug(f"Available in-memory states: {list(self.session_manager.state_store.keys())}")
+                    if hasattr(request, 'session'):
+                        session_states = [k for k in request.session.keys() if k.startswith("oauth_state_")]
+                        logger.debug(f"Available session states: {session_states}")
                     return Response("Invalid or expired state", status_code=400)
                 
-                state_data = self.session_manager.state_store[state]
+                if not state_data:
+                    logger.error(f"State data is None for state: {state}")
+                    return Response("Invalid state data", status_code=400)
                 virtual_client_id = state_data.get('virtual_client_id')
                 original_redirect_uri = state_data.get('original_redirect_uri')
                 original_state = state_data.get('original_state')

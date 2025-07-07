@@ -10,7 +10,7 @@ import jwt
 import json
 import httpx
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 from cryptography.hazmat.primitives import serialization
@@ -223,11 +223,11 @@ class JWTValidator:
                     response.raise_for_status()
                     jwks = response.json()
                     
-                    # Cache the JWKS
+                    # Cache the JWKS with consistent datetime type
                     self.jwks_cache = jwks
                     self.jwks_cache_expiry = datetime.now(timezone.utc).replace(
                         second=0, microsecond=0
-                    ).timestamp() + self.jwks_cache_ttl
+                    ) + timedelta(seconds=self.jwks_cache_ttl)
                     
                     logger.debug(f"JWKS cached until: {self.jwks_cache_expiry}")
                     
