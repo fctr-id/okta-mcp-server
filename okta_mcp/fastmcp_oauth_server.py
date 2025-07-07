@@ -2077,8 +2077,10 @@ class FastMCPOAuthServer:
         # Generate secure session key
         session_key = generate_secure_session_key()
         
-        # Create HTTP app first (this includes all the custom routes registered during __init__)
-        app = self.mcp.http_app()
+        # Use the standard FastMCP HTTP app
+        # Custom routes registered via @custom_route decorators should be included
+        # Mount at /mcp (no trailing slash) to avoid redirect issues with MCP clients
+        app = self.mcp.http_app(path="/mcp")
         
         # Add session middleware
         from starlette.middleware.sessions import SessionMiddleware
@@ -2092,6 +2094,33 @@ class FastMCPOAuthServer:
         
         # Add authentication middleware
         from starlette.middleware.base import BaseHTTPMiddleware
+        
+        # Define a custom ASGI middleware that rewrites the path at the ASGI level
+        class MCPPathRewriteMiddleware:
+            """Pure ASGI middleware to rewrite /mcp requests to /mcp/ to avoid FastMCP redirect issues"""
+            
+            def __init__(self, app):
+                self.app = app
+            
+            async def __call__(self, scope, receive, send):
+                """ASGI call that rewrites /mcp path to /mcp/ before FastMCP sees the request"""
+                
+                # Only modify HTTP requests to /mcp (exact match)
+                if (scope["type"] == "http" and 
+                    scope.get("path") == "/mcp"):
+                    
+                    logger.info(f"Rewriting path from /mcp to /mcp/ for {scope.get('method', 'unknown')} request")
+                    
+                    # Create a new scope with the rewritten path
+                    new_scope = dict(scope)
+                    new_scope["path"] = "/mcp/"
+                    new_scope["raw_path"] = b"/mcp/"
+                    
+                    # Continue with the rewritten scope
+                    return await self.app(new_scope, receive, send)
+                
+                # For all other requests, continue normally
+                return await self.app(scope, receive, send)
         
         class MCPAuthMiddleware(BaseHTTPMiddleware):
             def __init__(self, app, session_manager):
@@ -2202,10 +2231,14 @@ class FastMCPOAuthServer:
                 
                 return response
         
-        # Add the authentication middleware to the app
+        # Add middleware in reverse order (last added = first executed)
+        # 1. Add authentication middleware first
         app.add_middleware(MCPAuthMiddleware, session_manager=self.session_manager)
+        
+        # 2. Add path rewrite middleware as pure ASGI middleware (executes first)
+        app = MCPPathRewriteMiddleware(app)
 
-        logger.info("ASGI application created with session and authentication middleware")
+        logger.info("ASGI application created with session, authentication, and path rewrite middleware")
         return app
     
     async def run(self, host: str = "localhost", port: int = 3001):
