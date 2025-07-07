@@ -323,7 +323,6 @@ class FastMCPOAuthServer:
         # This external middleware class is not actually used
         
         # Create FastMCP server
-        # Note: streamable_http_path will be set when calling run() to avoid deprecation warning
         self.mcp = FastMCP(
             name="Okta MCP OAuth Server",
             instructions="""
@@ -1174,13 +1173,13 @@ class FastMCPOAuthServer:
                          })
                 
                 return RedirectResponse(redirect_url)
-            
+                
             except Exception as e:
                 logger.error(f"OAuth callback error: {e}")
                 return Response(f"OAuth callback failed: {str(e)}", status_code=500)
         
         logger.info("OAuth routes registered successfully")
-
+    
     async def _handle_authorization_code_grant(self, request: Request, form_data) -> JSONResponse:
         """Handle authorization_code grant type"""
         code = form_data.get("code")
@@ -1854,10 +1853,7 @@ class FastMCPOAuthServer:
                     <input type="hidden" name="scope" value="{scope}">
                     <input type="hidden" name="code_challenge" value="{code_challenge}">
                     <input type="hidden" name="action" value="allow">
-                    <button type="submit" class="btn btn-primary" id="authorize-btn">
-                        <span class="btn-text">Authorize</span>
-                        <span class="btn-loading" style="display: none;">Authorizing...</span>
-                    </button>
+                    <button type="submit" class="btn btn-primary">Authorize</button>
                 </form>
 
                 <form method="post" class="action-form">
@@ -1870,32 +1866,6 @@ class FastMCPOAuthServer:
             </div>
         </div>
     </div>
-
-    <script>
-        // Show loading indicator when Authorize is clicked
-        document.getElementById('authorize-btn').addEventListener('click', function(e) {{
-            const btn = e.target;
-            const form = btn.closest('form');
-            const textSpan = btn.querySelector('.btn-text');
-            const loadingSpan = btn.querySelector('.btn-loading');
-            
-            if (textSpan && loadingSpan) {{
-                // Prevent immediate form submission to show loading state
-                e.preventDefault();
-                
-                // Show loading state
-                textSpan.style.display = 'none';
-                loadingSpan.style.display = 'inline';
-                btn.style.opacity = '0.8';
-                btn.style.pointerEvents = 'none';
-                
-                // Submit form after brief delay to show loading
-                setTimeout(() => {{
-                    form.submit();
-                }}, 300);
-            }}
-        }});
-    </script>
 </body>
 </html>"""
 
@@ -2108,7 +2078,7 @@ class FastMCPOAuthServer:
         session_key = generate_secure_session_key()
         
         # Create HTTP app first (this includes all the custom routes registered during __init__)
-        app = self.mcp.http_app(path="/mcp")
+        app = self.mcp.http_app()
         
         # Add session middleware
         from starlette.middleware.sessions import SessionMiddleware
@@ -2130,14 +2100,6 @@ class FastMCPOAuthServer:
             
             async def dispatch(self, request, call_next):
                 """Middleware to handle MCP endpoint authentication at HTTP level"""
-                
-                # CRITICAL FIX: Rewrite /mcp to /mcp/ to prevent FastMCP redirect
-                if request.url.path == "/mcp":
-                    # Modify the request path to include trailing slash
-                    new_scope = dict(request.scope)
-                    new_scope['path'] = '/mcp/'
-                    new_scope['raw_path'] = b'/mcp/'
-                    request = Request(new_scope)
                 
                 # Handle CORS preflight for all requests with comprehensive headers
                 if request.method == "OPTIONS":
@@ -2180,7 +2142,7 @@ class FastMCPOAuthServer:
                 # Set user context for FastMCP middleware access
                 self.session_manager.set_current_user(user_info)
                 
-                # Check if this is an MCP endpoint request that requires authentication
+                # Check if this is an MCP endpoint request
                 if request.url.path.startswith('/mcp'):
                     logger.debug(f"MCP endpoint request: {request.method} {request.url.path}")
                     
