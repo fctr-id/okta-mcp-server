@@ -1,6 +1,6 @@
 <div align="center">
   <a href="https://fctr.io">
-    <img src="images/fctr-logo.png" alt="fctr.io" width="110" height="auto">
+    <img src="images/fctr-logo.png" alt="fctr.io" width="80" height="auto">
   </a>
 </div>
 
