@@ -6,7 +6,7 @@
 
 <div align="center">
   <h2>Okta MCP Server with OAuth 2.1 & RBAC</h2>
-  <h3>🔐 Enterprise-Grade Security for Model Context Protocol</h3>
+  <h3> Streamable  HTTP transport </h3>
   <h4>🚧 BETA v0.2.0 - OAuth Proxy Implementation</h4>
 </div>
 
@@ -14,7 +14,7 @@
 A  MCP server that enables AI models to securely interact with Okta environments through OAuth 2.1 authentication and Role-Based Access Control (RBAC). This implementation follows the legacy MCP specification (03-26) where the MCP server acts as an OAuth proxy between AI clients and Okta.
 </div>
 
-<div align="center">
+<div align="center" style="margin-top: 20px">
 <p><a href="https://github.com/fctr-id/okta-mcp-server/tree/feature/oauth-proxy-implementation">View on GitHub</a> | <a href="https://modelcontextprotocol.io/introduction">Learn about MCP</a> | <a href="https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol">OAuth for MCP</a></p>
 </div>
 
@@ -312,7 +312,7 @@ const mcpClient = new MCPClient({
 
 - [Architecture Overview](docs/ARCHITECTURE_OVERVIEW.md)
 - [Security Implementation](docs/security-implementation.md)
-- [Examples](examples/)
+
 
 ### Community & Issues
 
