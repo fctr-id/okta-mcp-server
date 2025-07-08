@@ -19,9 +19,9 @@ A  MCP server that enables AI models to securely interact with Okta environments
 </div>
 
 <div align="center">
-<h3>MCP Oauth Proxy Flow Architecture</h3>
+<h3>MCP Oauth Proxy Flow </h3>
 <p>
-  <img src="images/mcp-oauth-proxy.png" alt="OAuth Flow Diagram" width="800px" height="auto">
+  <img src="images/oauth-proxy.gif" alt="OAuth Flow Diagram" width="800px" height="auto">
 </p>
 </div>
 
