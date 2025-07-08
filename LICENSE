@@ -14,7 +14,12 @@ a. **Single Tenant Usage**: This tool is designed for single-tenant deployments 
 
 b. **Data Privacy**: All Okta data must remain within the user's environment. No tenant-specific data should be transmitted to external services except for AI query processing patterns.
 
-c. **Prohibition on Commercial Products by Others**: The Okta MCP Server cannot be used to create a product or service to be sold to clients by any entity other than the original creator (Fctr) without obtaining a separate commercial license from the copyright holders.
+c. **Prohibition on Commercial Products by Others**: This software, in whole or in part, cannot be used to create, develop, or offer any commercial product, service, or solution by any entity other than Fctr without obtaining explicit written commercial license from the copyright holders. This includes but is not limited to:
+   - SaaS offerings
+   - Managed services
+   - Consulting products incorporating this code
+   - Enterprise software solutions
+   - Any product or service sold, licensed, or offered for commercial gain
 
 ### 2. Free Edition and Future Commercial Features
 
@@ -37,22 +42,47 @@ b. The project maintainers can modify the licensing terms as needed.
 
 ### 5. Additional Restrictions
 
-1. **Multi-tenant Deployments**: Commercial licensing is required for:
+1. **Individual vs Commercial Entity Use**: 
+   - **Individual Use**: Individuals may use this software for personal, educational, or internal organizational use within their own company/employer
+   - **Commercial Entity Restrictions**: Any entity (corporation, partnership, LLC, etc.) is prohibited from:
+     - Creating products or services for external clients using this software
+     - Offering consulting services that incorporate this software
+     - Redistributing this software as part of any commercial offering
+     - Using this software to generate revenue from external parties
+   - **Internal Use Exception**: Companies may use this software internally for their own operations, but cannot use it to serve external customers or clients
+
+2. **Multi-tenant Deployments**: Commercial licensing is required for:
    - Multi-tenant service offerings
    - SaaS implementations
    - Managed service provider deployments
 
-2. **AI Provider Integration**:
+3. **Derivative Works**: Any derivative works, modifications, or integrations must comply with all restrictions herein and cannot be used to circumvent commercial licensing requirements.
+
+4. **AI Provider Integration**:
    - Users must maintain their own AI provider credentials
    - No sharing or redistribution of AI provider keys is permitted
 
 3. **No Redistribution for Commercial Use**: The Okta MCP Server cannot be redistributed or used as part of a commercial product or service offering by any entity other than the original creator (Fctr) without a separate commercial license.
 
+4. **Violation and Enforcement**: 
+   - Any violation of these terms immediately terminates all rights under this license
+   - Violating entities must cease all use immediately and may be subject to legal action
+   - Fctr reserves the right to seek injunctive relief and monetary damages
+   - Legal proceedings may be initiated in any jurisdiction where violations occur
+
 ### 6. Support and Maintenance Fees
 
 The original creator (Fctr) may offer and charge fees for support, maintenance, and additional services related to the Okta MCP Server.
 
-### 7. Liability
+### 8. Compliance and Monitoring
+
+Users acknowledge that:
+- Fctr may monitor compliance with these license terms
+- Usage statistics and implementation details may be requested for license compliance verification  
+- Commercial use detection tools may be employed
+- Regular audits of large-scale deployments may be conducted
+
+### 9. Liability
 
 This software is provided "AS IS", without warranty of any kind. In no event shall the authors or copyright holders be liable for any claim, damages, or other liability arising from the use of the software.
 
