@@ -2,11 +2,11 @@
 
 *If you have been following the model context protocl closely , the running joke is: "The S in MCP stands for Security"*
 
-This article is about FCTR's implementation based on the older (legacy) MCP protocol spec (03-26) standard which uses the MCP server as the authorization server (or proxy), which is now replaced by Dynamic Client Registration in the 06-18 spec revision.
+**FCTR's  MCP Server for Okta delivers OAuth 2.1-protected MCP access with role-based tool filtering.** The server's tools are protectd by Oauth and can aslo be filtered by roles so all users don;t get the same level of tool access.
 
-This was created as a POC and reference implementation to see how this works and may help with use cases where the organization does not have Okta SKUs to create custom auth servers, and DCR also needs a way or portal for clients to register which is not available yet.
+Our implementation uses the combined Authorization Server/Resource Server pattern, where the MCP server acts as both an OAuth authorization server and resource server. The approach is detailed in the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization), with [Aaron Parecki's analysis of the trade-offs](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol) providing additional context. 
 
- Feel free to browse and deploy. Leave a comment below if you see anything wrong or find vulnerabilities, please email dan@fctr.io. Happy to learn!
+It's particularly valuable for organizations that don't have dedicated OAuth infrastructure or where Dynamic Client Registration (DCR) may not be practical. The POC and reference implementation explores how OAuth proxy patterns work in practice, helping organizations that prefer static client registration or need tighter control over client registration processes. For security issues or vulnerabilities, please contact dan@fctr.io. We welcome feedback and contributions from the security community.
 
 ---
 
@@ -14,9 +14,9 @@ This was created as a POC and reference implementation to see how this works and
 
 The Model Context Protocol (MCP) has exploded in popularity, but here's the uncomfortable truth: most examples in the wild have no security whatsoever. This is why we're seeing MCP remote server exposures making headlines.
 
-While Dynamic Client Registration (DCR) is indeed more secure and reduces the burden on MCP servers by enabling automatic client registration, the reality is that most implementations skip security entirely. When security is attempted, most commercial MCP servers do not provide a secure way to initiate or register DCR clients. DCR creates practical challenges for enterprise deployments like application sprawl and complex audit trails, with each MCP client creating its own application registration.
+While Dynamic Client Registration (DCR) is indeed more secure for many scenarios and reduces the operational burden on MCP servers by enabling automatic client registration, the reality is that most implementations skip security entirely. When security is attempted, many production environments prefer static client registration for better audit trails and predictable security boundaries.
 
-DCR has many advantages: no load on the MCP server to act as a proxy, each client has its own token, revocation is possible for individual clients, and it removes the middleman role between clients and authorization servers.
+DCR excels in scenarios with many diverse clients, while the combined pattern works well for controlled enterprise environments where you want explicit oversight of client registration and unified access control policies.
 
 ## The Challenge: 
 
@@ -26,13 +26,20 @@ This creates a fundamental tension: **How do you give AI the data it needs to be
 
 The Model Context Protocol (MCP) was designed to solve this challenge by creating a standardized way for AI systems to access enterprise data sources. But early implementations suffered from a critical flaw: they treated security as an afterthought, not a foundational requirement.
 
-## The Old MCP Way vs. Our Secure Approach
+## The Combined vs. Separated Pattern Approach
 
 Before we dive into solutions, let's acknowledge what most MCP implementations actually look like: no security whatsoever. Everyone gets all access to everything. This "trust everyone with everything" approach might work for toy examples and demos, but it creates obvious problems when you're dealing with real enterprise data.
 
-Our Okta MCP Server takes a different approach. We're following what [Aaron Parecki calls the "legacy" pattern](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol), but with good reason. Not every organization has Okta SKUs for creating custom OAuth servers, and currently most providers do not support initial registration or make it easy to implement DCR securely.
+Our Okta MCP Server takes a different approach using what the [MCP Authorization specification describes as the combined Authorization Server/Resource Server pattern](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization). In this pattern, the MCP server handles both OAuth authorization and resource serving, which provides several advantages:
 
-Our implementation acts as a secure proxy between AI clients and Okta, implementing every security best practice outlined in the [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices).
+- **Simplified deployment**: Single server to deploy and maintain
+- **Tighter integration**: Direct control over both authentication and authorization 
+- **Enterprise compatibility**: Works with existing OAuth infrastructure without requiring DCR support
+- **Audit simplicity**: Single point for all access control decisions
+
+While Dynamic Client Registration (DCR) offers benefits like reduced server burden and per-client token management, the combined pattern is often more practical for enterprise deployments where you need predictable client registration processes and comprehensive audit trails.
+
+Our implementation acts as a secure proxy between AI clients and Okta, implementing OAuth 2.1 security requirements and following the security guidelines outlined in the [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices).
 
 For detailed information about our security fixes and implementation details, see our [Security Best Practices documentation](https://github.com/fctr-id/okta-mcp-server/blob/feature/oauth-proxy-implementation/docs/Security-Best-Practices.md).
 
@@ -54,7 +61,7 @@ Our server responds with OAuth 2.1 discovery metadata, essentially saying "you n
 The user is redirected to Okta for authentication. They log in with their corporate credentials, potentially including multi-factor authentication.
 
 **Step 4: Consent Screen**  
-The user sees a clear consent screen explaining exactly what data the AI will access and for what purpose. This consent expires every hour per MCP best practices, providing a workaround for the Confused Deputy vulnerability.
+The user sees a clear consent screen explaining exactly what data the AI will access and for what purpose. This consent expires after 24 hours in our implementation, providing additional security layers and ensuring users maintain control over AI access to their data.
 
 **Step 5: Token Exchange**  
 Once the user consents, Okta issues scoped access tokens specifically for our MCP server. These tokens are temporary and can be refreshed by the client.
@@ -66,7 +73,7 @@ Our server checks the user's Okta group memberships and dynamically filters whic
 The AI can now perform operations, but only within the user's authorized scope. Every request is validated, and all activities are logged for audit purposes.
 
 **Step 8: Session Management**  
-Sessions automatically expire after 2 hours. Consent expires every hour. Tokens refresh automatically to maintain seamless operation while preserving security.
+Sessions automatically expire after 2 hours. Consent expires after 24 hours. Tokens refresh automatically to maintain seamless operation while preserving security.
 
 ## Getting Started and What's Next
 
@@ -84,16 +91,18 @@ The choice isn't between security and functionality. It's between implementation
 
 We encourage security professionals to test our implementation. For security issues, contact our security team directly. For general feedback, standard support channels are available.
 
-**Coming in Part 2**: We'll explore the separated Authorization Server pattern with Dynamic Client Registration, showing how to evolve from this foundation to the architecture Aaron Parecki and the OAuth community are championing.
+**Coming in Part 2**: We'll explore the separated Authorization Server/Resource Server pattern with Dynamic Client Registration, showing how to evolve from this foundation to the distributed architecture defined in the [2025-06-18 MCP specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization) for more complex enterprise scenarios.
 
 ---
 
 
 ## Related Security Resources
 
+- [MCP Authorization Specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+- [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [MCP Specification Changelog](https://modelcontextprotocol.io/specification/2025-06-18/changelog)
 - [Aaron Parecki's OAuth for MCP Article](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol)
-- [OAuth 2.1 Security Best Practices](https://tools.ietf.org/html/draft-ietf-oauth-security-topics)
-- [MCP Security Considerations](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [OAuth 2.1 Security Best Practices](https://datatracker.ietf.org/doc/html/rfc9700)
 
 
 ---

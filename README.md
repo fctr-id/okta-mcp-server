@@ -11,7 +11,7 @@
 </div>
 
 <div align="center">
-A  MCP server that enables AI models to securely interact with Okta environments through OAuth 2.1 authentication and Role-Based Access Control (RBAC). This implementation follows the legacy MCP specification (03-26) where the MCP server acts as an OAuth proxy between AI clients and Okta.
+A  MCP server that enables AI models to securely interact with Okta environments through OAuth 2.1 authentication and Role-Based Access Control (RBAC). This implementation follows the combined Authorization Server/Resource Server pattern where the MCP server acts as an OAuth proxy between AI clients and Okta.
 </div>
 
 <div align="center" style="margin-top: 20px">
@@ -62,7 +62,7 @@ Your MCP server will be available at: `http://localhost:3001/mcp`
 
 ## 🔍 Why OAuth Proxy?
 
-This server implements the **legacy MCP specification (03-26)** where authentication and authorization are handled server-side through an OAuth proxy pattern. This approach provides several advantages:
+This server implements the **combined Authorization Server/Resource Server pattern** where authentication and authorization are handled server-side through an OAuth proxy pattern. This approach provides several advantages:
 
 ### 🔒 **Enhanced Security**
 - **No client-side secrets**: All OAuth credentials remain on the server
@@ -82,9 +82,9 @@ This server implements the **legacy MCP specification (03-26)** where authentica
 - **No client configuration**: No need to distribute OAuth credentials
 
 ### 🚀 **Future Evolution**
-This BETA v0.10 implementation demonstrates the OAuth proxy pattern described in our [security blog post](docs/BUSINESS_BLOG_POST_OAUTH_SECURITY.md). **Dynamic Client Registration (DCR)** support following the newer MCP specification (06-18) is planned for future releases, which will provide distributed authentication and reduced server load.
+This BETA v0.10 implementation demonstrates the OAuth proxy pattern with a combined Authorization Server/Resource Server architecture. The **2025-06-18 MCP specification** introduces separated Authorization/Resource Server roles with **Dynamic Client Registration (DCR)** support, which provides distributed authentication and reduced server load.
 
-For comparison between OAuth proxy and DCR approaches, see [Aaron Parecki's OAuth for MCP article](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol).
+For comparison between combined and separated OAuth patterns, see the [MCP Authorization specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization) and [OAuth for MCP article](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol).
 
 ## 🏗️ Okta Configuration
 
@@ -300,11 +300,14 @@ const mcpClient = new MCPClient({
 
 ### Security Resources
 
+- [MCP Authorization Specification](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)
+- [MCP Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [MCP Specification Changelog](https://modelcontextprotocol.io/specification/2025-06-18/changelog)
 - [OAuth for MCP Security Implementation](docs/BUSINESS_BLOG_POST_OAUTH_SECURITY.md)
 - [Security Best Practices](docs/Security-Best-Practices.md)
 - [Security Implementation Guide](docs/security-implementation.md)
-- [Aaron Parecki's OAuth for MCP Security Model](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol)
-- [MCP Specification Security Considerations](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [OAuth for MCP Article](https://aaronparecki.com/2025/04/03/15/oauth-for-model-context-protocol)
+- [OAuth 2.1 Security Best Practices](https://datatracker.ietf.org/doc/html/rfc9700)
 
 ## 🆘 Support
 
