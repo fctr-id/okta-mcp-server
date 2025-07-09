@@ -9,7 +9,9 @@
 </div>
 
 <div align="center">
-  <h3> **🚀 NEW in v0.1.0:** **Major Architecture Upgrade with FastMCP 2.0!**</h3>
+  <h3>🔥 NEW: OAuth 2.1 + RBAC Implementation Available</h3>
+  <p><strong>Looking for enterprise-grade security with OAuth 2.1 authentication and role-based access control?</strong></p>
+  <p><a href="https://github.com/fctr-id/okta-mcp-server/tree/feature/oauth-proxy-implementation"><strong>→ Check out the OAuth 2.1 + RBAC feature branch</strong></a></p>
 </div>
 
 <div align="center">
