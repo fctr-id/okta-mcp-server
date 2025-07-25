@@ -34,7 +34,7 @@ def register_user_tools(server: FastMCP, okta_client: OktaMcpClient):
     ) -> Dict[str, Any]:
         """List Okta users with filtering - returns first 50 users by default due to LLM context limitations.
 
-        ⚠️  IMPORTANT: This tool returns only the first 50 users by default (max 100) to stay within LLM context limits.
+        IMPORTANT: This tool returns only the first 50 users by default (max 100) to stay within LLM context limits.
         Use specific search filters to find the users you need rather than browsing all users.
         
         search (Recommended, Powerful):
