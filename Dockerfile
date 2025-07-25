@@ -36,6 +36,10 @@ RUN addgroup -g 1001 -S appgroup && \
 
 USER appuser
 
+# Default entrypoint for when no specific target is specified
+# This ensures the Docker registry can test the server
+ENTRYPOINT ["python", "main.py"]
+
 # STDIO variant (recommended)
 FROM base AS stdio
 ENV TRANSPORT_TYPE=stdio
