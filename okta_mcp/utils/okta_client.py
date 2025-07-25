@@ -11,16 +11,38 @@ logger = logging.getLogger(__name__)
 class OktaMcpClient:
     """Wrapper around the Okta SDK client with rate limiting and error handling."""
     
-    def __init__(self, client: OktaClient, request_manager=None):
+    def __init__(self, client: Optional[OktaClient] = None, request_manager=None):
         """Initialize the Okta MCP client wrapper.
         
         Args:
-            client: An initialized Okta SDK client
+            client: An initialized Okta SDK client (optional, will be created on demand)
             request_manager: Optional RequestManager to control concurrent requests
         """
-        self.client = client
+        self._client = client
+        self._client_initialized = client is not None
         self.rate_limits = {}  # Tracks rate limits by endpoint
         self.request_manager = request_manager
+    
+    @property
+    def client(self) -> OktaClient:
+        """Get the Okta client, initializing if needed."""
+        if not self._client_initialized:
+            self._initialize_client()
+        return self._client
+    
+    def _initialize_client(self):
+        """Initialize the Okta client on demand."""
+        org_url = os.getenv('OKTA_CLIENT_ORGURL')
+        api_token = os.getenv('OKTA_API_TOKEN')
+        
+        if not org_url or not api_token:
+            raise ValueError(
+                "Okta configuration required. Set OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables."
+            )
+        
+        self._client = create_okta_client(org_url, api_token)
+        self._client_initialized = True
+        logger.info("Okta client initialized on demand")
     
     def update_rate_limit(self, endpoint: str, reset_seconds: int):
         """Update rate limit tracking for an endpoint.
@@ -64,6 +86,9 @@ class OktaMcpClient:
         Returns:
             The result of the API call
         """
+        # Ensure client is initialized
+        _ = self.client  # This triggers initialization if needed
+        
         # If we have a request manager, use it to control concurrency
         if self.request_manager:
             logger.debug(f"Executing API call via RequestManager: {func.__name__}")

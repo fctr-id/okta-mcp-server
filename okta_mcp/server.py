@@ -81,21 +81,11 @@ def create_server(enable_auth: bool = True):
             auth=auth_provider  # Add authentication if configured
         )
         
-        # Initialize Okta client properly
-        from okta_mcp.utils.okta_client import OktaMcpClient, create_okta_client
-        import os
+        # Create Okta client wrapper (will initialize on demand)
+        from okta_mcp.utils.okta_client import OktaMcpClient
+        okta_client = OktaMcpClient()  # No immediate initialization
         
-        logger.info("Initializing Okta client")
-        
-        # Create the Okta SDK client first
-        org_url = os.getenv('OKTA_CLIENT_ORGURL')
-        api_token = os.getenv('OKTA_API_TOKEN')
-        okta_sdk_client = create_okta_client(org_url, api_token)
-        
-        # Now create the MCP wrapper with the SDK client
-        okta_client = OktaMcpClient(client=okta_sdk_client)
-        
-        # Register tools directly - no registry needed
+        # Register tools with the lazy client
         logger.info("Registering Okta tools")
         from okta_mcp.tools.user_tools import register_user_tools
         from okta_mcp.tools.apps_tools import register_apps_tools
@@ -110,9 +100,6 @@ def create_server(enable_auth: bool = True):
         register_group_tools(mcp, okta_client)
         register_policy_tools(mcp, okta_client) 
         register_datetime_tools(mcp, okta_client)
-        
-        # Store client reference for potential cleanup
-        mcp.okta_client = okta_client
         
         auth_status = "with authentication" if auth_provider else "without authentication"
         logger.info(f"Okta MCP server created successfully {auth_status} with all tools registered")

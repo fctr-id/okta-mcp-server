@@ -57,24 +57,24 @@ def main():
     # Load environment variables
     load_dotenv()
     
-    # Check for required environment variables
+    # Check for environment variables (warn but don't block)
     required_vars = ["OKTA_CLIENT_ORGURL", "OKTA_API_TOKEN"]
     missing_vars = [var for var in required_vars if not os.getenv(var)]
     
     if missing_vars:
-        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
-        logger.error("Create a .env file with:")
-        logger.error("OKTA_CLIENT_ORGURL=https://your-org.okta.com")
-        logger.error("OKTA_API_TOKEN=your_api_token_here")
-        logger.error("LOG_LEVEL=INFO")
-        logger.error("OKTA_CONCURRENT_LIMIT=15")
-        logger.error("")
-        logger.error("Generate an API token in Okta: Admin > Security > API > Tokens")
-        return 1
+        logger.warning(f"Missing Okta environment variables: {', '.join(missing_vars)}")
+        logger.warning("Server will start but Okta tools will require configuration to work.")
+        logger.warning("Create a .env file with:")
+        logger.warning("OKTA_CLIENT_ORGURL=https://your-org.okta.com")
+        logger.warning("OKTA_API_TOKEN=your_api_token_here")
+        logger.warning("LOG_LEVEL=INFO")
+        logger.warning("OKTA_CONCURRENT_LIMIT=15")
+        logger.warning("")
+        logger.warning("Generate an API token in Okta: Admin > Security > API > Tokens")
     
-    # Validate Okta URL format
+    # Validate Okta URL format (only if provided)
     okta_url = os.getenv("OKTA_CLIENT_ORGURL")
-    if not okta_url.startswith("https://"):
+    if okta_url and not okta_url.startswith("https://"):
         logger.error("OKTA_CLIENT_ORGURL must be in format: https://your-org.okta.com")
         return 1
     
