@@ -36,14 +36,11 @@ RUN addgroup -g 1001 -S appgroup && \
 
 USER appuser
 
-# Default entrypoint for when no specific target is specified
-# This ensures the Docker registry can test the server
-ENTRYPOINT ["python", "main.py"]
-
-# STDIO variant (recommended)
-FROM base AS stdio
-ENV TRANSPORT_TYPE=stdio
-ENTRYPOINT ["python", "main.py"]
+# SSE variant (deprecated)
+FROM base AS sse
+ENV TRANSPORT_TYPE=sse
+EXPOSE 3000
+ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
 
 # HTTP variant (current standard for web)
 FROM base AS http
@@ -51,8 +48,7 @@ ENV TRANSPORT_TYPE=http
 EXPOSE 3000
 ENTRYPOINT ["python", "main.py", "--http", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
 
-# SSE variant (deprecated)
-FROM base AS sse
-ENV TRANSPORT_TYPE=sse
-EXPOSE 3000
-ENTRYPOINT ["python", "main.py", "--sse", "--host=0.0.0.0", "--port=3000", "--iunderstandtherisks"]
+# STDIO variant (recommended) - LAST STAGE = DEFAULT
+FROM base AS stdio
+ENV TRANSPORT_TYPE=stdio
+ENTRYPOINT ["python", "main.py"]
