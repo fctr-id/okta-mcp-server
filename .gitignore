@@ -16,3 +16,4 @@ okta_mcp/tools/create_grps.py
 clients/event-stream-monitor.py
 clients/mcp-*.py
 test_*
+okta_mcp/main.py
