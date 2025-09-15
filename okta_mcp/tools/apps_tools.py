@@ -17,54 +17,95 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
     
     @server.tool()
     async def list_okta_applications(
-        search: str = Field(default="", description="Okta expression to filter applications"),
-        max_results: int = Field(default=50, ge=1, le=100, description="Maximum applications to return (1-100)"),
+        q: str = Field(default="", description="Searches for apps with name or label properties that start with the q value"),
+        filter: str = Field(default="", description="Filters apps by status, user.id, group.id, credentials.signing.kid or name"),
+        limit: int = Field(default=50, ge=1, le=200, description="Maximum applications to return (1-200)"),
+        after: str = Field(default="", description="Pagination cursor for the next page of results"),
+        use_optimization: bool = Field(default=False, description="Use query optimization for subset of app properties"),
+        include_non_deleted: bool = Field(default=False, description="Include non-active, but not deleted apps"),
+        expand: str = Field(default="", description="Link expansion to embed more resources (supports expand=user/{userId})"),
         ctx: Context = None
     ) -> Dict[str, Any]:
-        """List Okta applications with filtering - limited to 50 apps by default for context efficiency.
+        """List all applications in the Okta organization with pagination and filtering.
         
-        IMPORTANT LIMITATION: Returns only first 50 applications by default (max 100) to stay within 
-        LLM context limits. Use specific search filters to find the applications you need.
+        OAuth 2.0 scopes: okta.apps.read
         
-        Search Parameter:
-        Uses Okta expression language to filter applications with operators:
-        • eq (equals), ne (not equals), co (contains), sw (starts with), ew (ends with)
-        • pr (present), gt (greater than), lt (less than), ge (>=), le (<=)
+        Lists all apps in the org with pagination. A subset of apps can be returned that match 
+        a supported filter expression or query. The results are paginated according to the 
+        limit parameter. If there are multiple pages of results, the header contains a next link.
         
-        Common Application Filters:
-        • profile.name co "Slack" - Applications containing "Slack" in name
-        • status eq "ACTIVE" - Only active applications
-        • status eq "INACTIVE" - Only inactive applications
-        • signOnMode eq "SAML_2_0" - SAML applications only
-        • signOnMode eq "OPENID_CONNECT" - OIDC applications only
-        • profile.label sw "Test" - Applications with labels starting with "Test"
-        • lastUpdated gt "2024-01-01T00:00:00.000Z" - Recently updated applications
+        Note: To list all of a member's assigned app links, use the List all assigned app 
+        links endpoint in the User Resources API.
         
-        Application Sign-On Modes:
-        • BOOKMARK, BASIC_AUTH, BROWSER_PLUGIN, SECURE_PASSWORD_STORE
-        • SAML_2_0, WS_FEDERATION, OPENID_CONNECT, AUTO_LOGIN
+        Query Parameters:
         
-        Examples:
-        • 'profile.name co "Office"' - Find Office 365 or similar apps
-        • 'status eq "ACTIVE" and signOnMode eq "SAML_2_0"' - Active SAML apps
-        • 'profile.label sw "Prod"' - Production environment apps
+        q (string): Searches for apps with name or label properties that starts with the q 
+        value using the startsWith operation.
+        Example: q=Okta
         
-        Use search filters to find specific applications rather than browsing all apps.
+        filter (string): Filters apps by status, user.id, group.id, credentials.signing.kid 
+        or name expression that supports the eq operator.
+        
+        Filter Examples:
+        • Filter for active apps: status eq "ACTIVE"
+        • Filter for apps with specific name: name eq "okta_org2org"
+        • Filter for apps using a specific key: credentials.signing.kid eq "SIMcCQNY3uwXoW3y0vf6VxiBb5n9pf8L2fK8d-F1bm4"
+        • Filter by user assignment: user.id eq "00u1emaK22p5pX0123d7"
+        • Filter by group assignment: group.id eq "00g1emaK22p5pX0123d7"
+        
+        limit (integer): Specifies the number of results per page (max 200, default -1 for all)
+        
+        after (string): Specifies the pagination cursor for the next page of results. 
+        Treat this as an opaque value obtained through the next link relationship.
+        
+        use_optimization (boolean): Specifies whether to use query optimization. If true, 
+        the response contains a subset of app instance properties for better performance.
+        
+        include_non_deleted (boolean): Specifies whether to include non-active, but not 
+        deleted apps in the results.
+        
+        expand (string): An optional parameter for link expansion to embed more resources 
+        in the response. Only supports expand=user/{userId} and must be used with the 
+        user.id eq "{userId}" filter query for the same user.
+        
+        Application Status Values:
+        • ACTIVE - Application is active and available to users
+        • INACTIVE - Application is disabled and not available
+        
+        Common Sign-On Modes:
+        • SAML_2_0, OPENID_CONNECT, SECURE_PASSWORD_STORE, AUTO_LOGIN
+        • BOOKMARK, BASIC_AUTH, BROWSER_PLUGIN, WS_FEDERATION
+        
         Returns application details including ID, name, label, status, and sign-on configuration.
         """
         try:
-            # Validate max_results parameter
-            if max_results < 1 or max_results > 100:
-                raise ValueError("max_results must be between 1 and 100")
+            # Validate limit parameter
+            if limit < 1 or limit > 200:
+                raise ValueError("limit must be between 1 and 200")
             
             if ctx:
-                logger.info(f"SERVER: Executing list_okta_applications with search={search}, max_results={max_results}")
+                logger.info(f"SERVER: Executing list_okta_applications with q={q}, filter={filter}, limit={limit}")
             
             # Prepare request parameters
-            params = {'limit': min(max_results, 100)}
+            params = {'limit': limit}
             
-            if search:
-                params['search'] = search
+            if q:
+                params['q'] = q
+            
+            if filter:
+                params['filter'] = filter
+                
+            if after:
+                params['after'] = after
+                
+            if use_optimization:
+                params['useOptimization'] = use_optimization
+                
+            if include_non_deleted:
+                params['includeNonDeleted'] = include_non_deleted
+                
+            if expand:
+                params['expand'] = expand
             
             if ctx:
                 logger.info(f"Executing Okta API request with params: {params}")
@@ -78,11 +119,11 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                 logger.error(f"Error listing applications: {err}")
                 return handle_okta_result(err, "list_applications")
             
-            # Get apps up to max_results limit
-            all_apps = apps[:max_results] if apps else []
+            # Get apps up to limit
+            all_apps = apps[:limit] if apps else []
             
             if ctx:
-                logger.info(f"Retrieved {len(all_apps)} applications (limited to {max_results})")
+                logger.info(f"Retrieved {len(all_apps)} applications (limited to {limit})")
                 await ctx.report_progress(100, 100)
             
             # Determine if there are more results available
@@ -93,20 +134,27 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
                 "applications": [app.as_dict() for app in all_apps],
                 "summary": {
                     "returned_count": len(all_apps),
-                    "max_requested": max_results,
-                    "context_limited": True
+                    "limit": limit,
+                    "has_more": has_more
                 }
             }
+            
+            # Add pagination info if available
+            if resp and resp.has_next():
+                result["pagination"] = {
+                    "next_cursor": resp.get_next_cursor(),
+                    "has_next": True
+                }
             
             # Add helpful messaging
             if has_more:
                 result["message"] = (
-                    f"Showing first {len(all_apps)} applications (limited for LLM context). "
-                    f"Use search filters like 'profile.name co \"Slack\"' to find specific apps."
+                    f"Showing {len(all_apps)} applications. "
+                    f"Use pagination cursor or refine filters to get more specific results."
                 )
             elif len(all_apps) == 0:
                 result["message"] = (
-                    "No applications found. Try broader search criteria or check your filters."
+                    "No applications found. Try different search criteria or filters."
                 )
             else:
                 result["message"] = f"Found {len(all_apps)} applications matching your criteria."
