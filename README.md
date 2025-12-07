@@ -9,9 +9,9 @@
 </div>
 
 <div align="center">
-  <h3>🔥 NEW: OAuth 2.1 + RBAC Implementation Available</h3>
-  <p><strong>Looking for enterprise-grade security with OAuth 2.1 authentication and role-based access control?</strong></p>
-  <p><a href="https://github.com/fctr-id/okta-mcp-server/tree/feature/oauth-proxy-implementation"><strong>→ Check out the OAuth 2.1 + RBAC feature branch</strong></a></p>
+  <h3>🔥  NEW: TAKO MCP Server Now Available</h3>
+  <p><strong>A complete rewrite built on Anthropic's new MCP architecture pattern with dual-mode operation, context-engineering, enhanced security sandbox, and production-ready Docker support.</strong></p>
+  <p><a href="https://github.com/fctr-id/fctr-okta-mcp-server"><strong>→ Explore TAKO MCP Server</strong></a></p>
 </div>
 
 <div align="center">
