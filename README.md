@@ -9,7 +9,7 @@
 </div>
 
 <div align="center">
-  <h3>🔥  VERSION ALERT!!!: Re-built MCP Server Now Available</h3>
+  <h3>🔥   ALERT!!! A brand new re-built MCP Server now available</h3>
   <p><strong>A complete rewrite built on Anthropic's new MCP architecture pattern with dual-mode operation, context-engineering, enhanced security sandbox, and production-ready Docker support.</strong></p>
   <p><a href="https://github.com/fctr-id/fctr-okta-mcp-server"><strong>→ Explore TAKO MCP Server</strong></a></p>
 </div>
