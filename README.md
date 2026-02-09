@@ -74,25 +74,21 @@ Check Geographic Impossibility → Review Behavioral Flags (15+ min)
 - **📝 Complete Rewrite**: All tools rewritten with better annotations and descriptions for AI understanding
 - **🛡️ Improved Validation**: Enhanced error handling and input validation across all operations
 
-### 🌐 **Unified Client**
-- **🎯 Single CLI**: New unified command-line client supporting multiple transports (STDIO, HTTP)
-- **⚙️ Simplified Setup**: Streamlined configuration with intelligent defaults
-
 ### 🔐 **Advanced Security**
 - **🎫 Bearer Tokens**: Full JWT bearer token support with `jwks_uri` validation
 - **🏢 Enterprise Auth**: Support for enterprise authentication flows and scope-based access
 
 ### 🚀 **Future-Ready**
-- **🎯 Sampling Support**: Foundation for advanced request sampling capabilities
 - **🔌 Middleware Ready**: Extensible middleware system for custom processing
 - **📡 Protocol Evolution**: Access to latest MCP features as they're developed and standardized
+
+> **📝 Note**: CLI clients and AI sampling features have been moved to `_Archived/` folder due to pydantic-ai dependency conflicts (security vulnerability ). See `_Archived/README.md` for details.
 
 ## 📋 Table of Contents
 
 - [🎉 What's New in v0.1.1-BETA - Enterprise-Grade Special Tools!](#-whats-new-in-v011-beta---enterprise-grade-special-tools)
   - [🏗️ **Core Architecture**](#️-core-architecture)
   - [🛠️ **Enhanced Tools**](#️-enhanced-tools)
-  - [🌐 **Unified Client**](#-unified-client)
   - [🔐 **Advanced Security**](#-advanced-security)
   - [🚀 **Future-Ready**](#-future-ready)
 - [📋 Table of Contents](#-table-of-contents)
@@ -285,20 +281,7 @@ pip install -r requirements.txt
 
 Create a config file with your Okta settings:
 
-To use the command line client (no memory), use the instructions below
-
-```bash
-# Copy the sample config
-cp .env.sample .env
-
-# Edit the env with your settings
-# Required: Okta domain and API token and LLM settings
-
-cd clients
-python mcp-cli-stdio-client.py
-```
-
-To use MCP hosts like Claude Code, vsCode ...etc find the json config below
+> **📝 Note**: Standalone CLI clients have been archived. For MCP host integration (Claude Desktop, VS Code, etc.), use the server directly with the JSON configuration below.
 
 
 ### Supported Transports and Launching
@@ -353,12 +336,6 @@ python main.py --http --iunderstandtherisks
 - ✅ **Event streaming** - Server-Sent Events for real-time notifications
 - ✅ **Better error handling** - Detailed error responses
 - ✅ **Modern protocol** - Based on latest MCP specifications
-
-**For Streamable HTTP Client Testing:**
-```bash
-cd clients
-python mcp-cli-streamable-client.py
-```
 
 #### 3. Remote HTTP Access - High Risk Advanced Use Only
 
