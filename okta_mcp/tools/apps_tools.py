@@ -19,7 +19,7 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
     async def list_okta_applications(
         q: str = Field(default="", description="Searches for apps with name or label properties that start with the q value"),
         filter: str = Field(default="", description="Filters apps by status, user.id, group.id, credentials.signing.kid or name"),
-        limit: int = Field(default=50, ge=1, le=200, description="Maximum applications to return (1-200)"),
+        limit: int = Field(default=50, ge=1, le=200, description="Maximum applications to return per page (1-200, default 50)"),
         after: str = Field(default="", description="Pagination cursor for the next page of results"),
         use_optimization: bool = Field(default=False, description="Use query optimization for subset of app properties"),
         include_non_deleted: bool = Field(default=False, description="Include non-active, but not deleted apps"),
@@ -53,7 +53,8 @@ def register_apps_tools(server: FastMCP, okta_client: OktaMcpClient):
         • Filter by user assignment: user.id eq "00u1emaK22p5pX0123d7"
         • Filter by group assignment: group.id eq "00g1emaK22p5pX0123d7"
         
-        limit (integer): Specifies the number of results per page (max 200, default -1 for all)
+        limit (integer): Specifies the number of results per page (1-200, default 50).
+        Use the after cursor to request additional pages when more results are available.
         
         after (string): Specifies the pagination cursor for the next page of results. 
         Treat this as an opaque value obtained through the next link relationship.
